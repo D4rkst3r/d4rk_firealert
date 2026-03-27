@@ -25,10 +25,10 @@ Config.Dispatch = {
     Color   = "#e74c3c",
 }
 
--- FIX #5: Maximale Platzierungsdistanz vom Spieler
 Config.Placement = {
-    MaxDistance = 4.0,  -- Meter (verhindert Fernplatzierung via Mausrad-Spam)
-    MinDistance = 0.5,
+    MaxDistance        = 4.0,   -- Maximale Platzierungsdistanz vom Spieler in Metern
+    MinDistance        = 0.5,
+    SystemSearchRadius = 50.0,  -- Radius in dem nach Panels gesucht wird (Option C)
 }
 
 Config.Devices = {

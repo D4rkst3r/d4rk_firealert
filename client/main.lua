@@ -4,12 +4,37 @@ currentSystemId  = nil
 local activeAlarms   = {}
 local triggeredSmoke = {}  -- { [deviceId] = true }
 
+-- Sirenen-Audio: { [systemId] = { soundId = int, lastPlayed = int } }
+local sirenAudio     = {}
+
 -- Tracking-Maps für O(1) Zugriff
-local panelObjects    = {}  -- { [systemId] = entity }
+-- panelObjects ist global damit placement.lua GetNearbyPanels() nutzen kann
+panelObjects      = {}  -- { [systemId] = entity }
 local sirenObjects    = {}  -- { [systemId] = { entity, ... } }
 local smokeObjects    = {}  -- { [systemId] = { { obj, deviceId, zone }, ... } }
--- FIX #7: Map für Geräteliste — kein Flat-Array-Scan mehr in OpenDeviceList
-local devicesBySystem = {}  -- { [systemId] = { { obj, state }, ... } }
+local devicesBySystem = {}  -- { [systemId] = { entity, ... } }
+
+-- Option C: Gibt alle Panels zurück die innerhalb von `radius` Metern um `coords` liegen
+-- Rückgabe: { { systemId, systemName, dist, entity }, ... } sortiert nach Distanz
+function GetNearbyPanels(coords, radius)
+    local results = {}
+    for sId, panel in pairs(panelObjects) do
+        if DoesEntityExist(panel) then
+            local dist = #(coords - GetEntityCoords(panel))
+            if dist <= radius then
+                table.insert(results, {
+                    systemId   = sId,
+                    systemName = Entity(panel).state.systemName or ('System #' .. sId),
+                    dist       = dist,
+                    entity     = panel
+                })
+            end
+        end
+    end
+    -- Nächstes Panel zuerst
+    table.sort(results, function(a, b) return a.dist < b.dist end)
+    return results
+end
 
 local DeviceLabels = {
     [GetHashKey('prop_fire_alarm_03')]              = { label = 'Rauchmelder',     icon = 'wind'          },
@@ -91,10 +116,14 @@ function CreateBMAProp(data)
     lib.requestModel(model)
     local obj = CreateObject(model, coords.x, coords.y, coords.z, false, false, false)
 
-    Entity(obj).state:set('systemId',     data.system_id,    true)
-    Entity(obj).state:set('zoneName',     data.zone,         true)
-    Entity(obj).state:set('deviceId',     data.id,           true)
-    Entity(obj).state:set('deviceHealth', data.health or 100, true)
+    Entity(obj).state:set('systemId',     data.system_id,          true)
+    Entity(obj).state:set('zoneName',     data.zone,               true)
+    Entity(obj).state:set('deviceId',     data.id,                 true)
+    Entity(obj).state:set('deviceHealth', data.health or 100,      true)
+    -- Option C: Systemname im State Bag damit GetNearbyPanels ihn lesen kann
+    if model == Config.Devices["panel"].model then
+        Entity(obj).state:set('systemName', data.system_name or ('System #' .. tostring(data.system_id)), true)
+    end
 
     SetEntityRotation(obj, rot.x, rot.y, rot.z, 2, true)
     FreezeEntityPosition(obj, true)
@@ -163,6 +192,12 @@ RegisterNetEvent('d4rk_firealert:client:updateSystemStatus', function(systemId, 
 
     if status == 'normal' then
         lib.notify({ title = 'BMA', description = 'System ' .. systemId .. ' wurde quittiert.', type = 'inform' })
+        -- Sirenen-Sound sofort stoppen
+        if sirenAudio[id] and sirenAudio[id].soundId ~= -1 then
+            StopSound(sirenAudio[id].soundId)
+            ReleaseSoundId(sirenAudio[id].soundId)
+        end
+        sirenAudio[id] = nil
         if smokeObjects[id] then
             for _, s in ipairs(smokeObjects[id]) do
                 triggeredSmoke[s.deviceId] = nil
@@ -289,6 +324,77 @@ CreateThread(function()
         end
 
         Wait(sleep)
+    end
+end)
+
+-- Sirenen-Audio-Thread
+-- Wichtig: GetSoundId() verwenden statt -1, damit StopSound() später funktioniert.
+-- Mit -1 als Handle kann der Sound nicht gestoppt werden — das war der Bug.
+--
+-- Nur nicht-loopende Sounds verwenden! Loopende Sounds (wie Altitude_Warning)
+-- laufen sonst endlos weiter auch wenn StopSound aufgerufen wird.
+--
+-- Getestete nicht-loopende Alarm-Sounds:
+--   "Remote_Control_Fuse_Box_Alarm" / "GTAO_FM_Events_Soundset"  (~2s) ← Standard
+--   "Breaker_01"                    / "DLC_HALLOWEEN_FVJ_Sounds" (~1.5s)
+--   "Breaker_02"                    / "DLC_HALLOWEEN_FVJ_Sounds" (~2s)
+CreateThread(function()
+        local SOUND_NAME  = "Altitude_Warning"
+        local SOUND_SET   = "EXILE_1"
+        local INTERVAL_MS = 2500  -- Sound ist ~2.5s lang
+        local RANGE       = 40.0
+
+    while true do
+        Wait(500)
+
+        for sId, isAlarm in pairs(activeAlarms) do
+            if isAlarm and sirenObjects[sId] and #sirenObjects[sId] > 0 then
+                local now = GetGameTimer()
+
+                if not sirenAudio[sId] then
+                    sirenAudio[sId] = { soundId = -1, lastPlayed = 0 }
+                end
+
+                local audio = sirenAudio[sId]
+
+                if (now - audio.lastPlayed) >= INTERVAL_MS then
+                    -- Vorherigen Sound-Handle sauber beenden bevor neuer gespielt wird
+                    if audio.soundId ~= -1 then
+                        StopSound(audio.soundId)
+                        ReleaseSoundId(audio.soundId)
+                        audio.soundId = -1
+                    end
+
+                    local played = false
+                    for _, siren in ipairs(sirenObjects[sId]) do
+                        if DoesEntityExist(siren) then
+                            local c       = GetEntityCoords(siren)
+                            local soundId = GetSoundId()
+                            PlaySoundFromCoord(soundId, SOUND_NAME, c.x, c.y, c.z, SOUND_SET, false, RANGE, false)
+                            audio.soundId    = soundId
+                            audio.lastPlayed = now
+                            played = true
+                            break
+                        end
+                    end
+
+                    if not played then
+                        sirenAudio[sId] = nil
+                    end
+                end
+            end
+        end
+
+        -- Systeme ohne aktiven Alarm: Sound stoppen und aufräumen
+        for sId, audio in pairs(sirenAudio) do
+            if not activeAlarms[sId] then
+                if audio.soundId ~= -1 then
+                    StopSound(audio.soundId)
+                    ReleaseSoundId(audio.soundId)
+                end
+                sirenAudio[sId] = nil
+            end
+        end
     end
 end)
 
@@ -558,12 +664,20 @@ RegisterNetEvent('d4rk_firealert:client:loadInitialDevices', function(devices)
         if DoesEntityExist(obj) then DeleteEntity(obj) end
     end
     spawnedObjects   = {}
-    panelObjects     = {}
+    panelObjects     = {}  -- global
     sirenObjects     = {}
     smokeObjects     = {}
     devicesBySystem  = {}
     activeAlarms     = {}
     triggeredSmoke   = {}
+    -- Laufende Sirenen-Sounds stoppen
+    for _, audio in pairs(sirenAudio) do
+        if audio.soundId ~= -1 then
+            StopSound(audio.soundId)
+            ReleaseSoundId(audio.soundId)
+        end
+    end
+    sirenAudio = {}
 
     for _, data in ipairs(devices) do CreateBMAProp(data) end
 end)
@@ -584,6 +698,15 @@ AddEventHandler('onResourceStop', function(resourceName)
         DeleteEntity(ghost)
         ghost = nil
     end
+
+    -- Sirenen-Sounds sauber beenden
+    for _, audio in pairs(sirenAudio) do
+        if audio.soundId ~= -1 then
+            StopSound(audio.soundId)
+            ReleaseSoundId(audio.soundId)
+        end
+    end
+    sirenAudio = {}
 
     lib.hideTextUI()
     print("^1[d4rk_firealert] Client-seitige Props bereinigt.^7")

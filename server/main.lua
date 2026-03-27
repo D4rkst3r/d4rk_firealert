@@ -191,15 +191,11 @@ RegisterNetEvent('d4rk_firealert:server:registerDevice', function(deviceType, co
 
     local newId = db.addDevice(systemId, deviceType, coords, rot, zone)
     if newId then
-        TriggerClientEvent('d4rk_firealert:client:addDevice', -1, {
-            id        = newId,
-            system_id = systemId,
-            type      = deviceType,
-            coords    = json.encode(coords),
-            rotation  = json.encode(rot),
-            zone      = zone,
-            health    = 100
-        })
+        -- Gerät inkl. Systemname laden damit Client den systemName State Bag setzen kann
+        local newDevice = db.getDeviceWithSystemName(newId)
+        if newDevice then
+            TriggerClientEvent('d4rk_firealert:client:addDevice', -1, newDevice)
+        end
     end
 end)
 

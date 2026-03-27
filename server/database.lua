@@ -30,8 +30,25 @@ function db.addDevice(systemId, type, coords, rot, zone)
     )
 end
 
+-- Holt ein frisch eingefügtes Gerät inkl. Systemname für den Delta-Sync
+function db.getDeviceWithSystemName(deviceId)
+    local result = MySQL.query.await([[
+        SELECT fd.*, fs.name AS system_name
+        FROM fire_devices fd
+        JOIN fire_systems fs ON fd.system_id = fs.id
+        WHERE fd.id = ?
+    ]], { deviceId })
+    return result and result[1] or nil
+end
+
+-- Join mit fire_systems damit Panels ihren Systemnamen im State Bag speichern können
+-- (wird für Option C Hybrid-Systemauswahl beim Platzieren benötigt)
 function db.getAllDevices()
-    return MySQL.query.await('SELECT * FROM fire_devices')
+    return MySQL.query.await([[
+        SELECT fd.*, fs.name AS system_name
+        FROM fire_devices fd
+        JOIN fire_systems fs ON fd.system_id = fs.id
+    ]])
 end
 
 function db.getDevicesBySystem(systemId)
