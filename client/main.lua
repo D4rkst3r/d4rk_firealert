@@ -338,7 +338,7 @@ CreateThread(function()
     local INTERVAL_MS = 2500  -- Sound ist ~2.5s lang
     local RANGE       = 40
 
-    
+
     -- Soundbank vorab laden — ohne das kein Sound
     RequestScriptAudioBank(SOUND_SET, false)
 
@@ -594,6 +594,7 @@ exports.ox_target:addModel(Config.Devices["panel"].model, {
         icon     = 'fas fa-terminal',
         label    = 'System-Konsole öffnen',
         groups   = Config.Job,
+        distance = Config.Interaction.DistancePanel,
         onSelect = function(data) OpenBMAMenu(data.entity) end
     },
     {
@@ -601,6 +602,7 @@ exports.ox_target:addModel(Config.Devices["panel"].model, {
         icon     = 'fas fa-hammer',
         label    = 'Zentrale abmontieren',
         groups   = Config.Job,
+        distance = Config.Interaction.DistancePanel,
         onSelect = function(data) RemoveDeviceAction(data.entity) end
     }
 })
@@ -610,6 +612,7 @@ exports.ox_target:addModel(Config.Devices["pull"].model, {
         name     = 'pull_alarm',
         icon     = 'fas fa-hand-rock',
         label    = 'Alarm auslösen',
+        distance = Config.Interaction.DistancePanel,
         onSelect = function(data)
             local sId    = Entity(data.entity).state.systemId
             local zone   = Entity(data.entity).state.zoneName or "Manueller Melder"
@@ -624,6 +627,7 @@ exports.ox_target:addModel(Config.Devices["pull"].model, {
         icon     = 'fas fa-tools',
         label    = 'Melder reparieren',
         groups   = Config.Job,
+        distance = Config.Interaction.DistancePanel,
         onSelect = function(data) RepairDeviceAction(data.entity) end
     },
     {
@@ -631,6 +635,7 @@ exports.ox_target:addModel(Config.Devices["pull"].model, {
         icon     = 'fas fa-hammer',
         label    = 'Melder abmontieren',
         groups   = Config.Job,
+        distance = Config.Interaction.DistancePanel,
         onSelect = function(data) RemoveDeviceAction(data.entity) end
     }
 })
@@ -641,6 +646,7 @@ exports.ox_target:addModel(Config.Devices["smoke"].model, {
         icon     = 'fas fa-tools',
         label    = 'Rauchmelder reparieren',
         groups   = Config.Job,
+        distance = Config.Interaction.DistancePanel,
         onSelect = function(data) RepairDeviceAction(data.entity) end
     },
     {
@@ -648,6 +654,7 @@ exports.ox_target:addModel(Config.Devices["smoke"].model, {
         icon     = 'fas fa-hammer',
         label    = 'Rauchmelder abmontieren',
         groups   = Config.Job,
+        distance = Config.Interaction.DistancePanel,
         onSelect = function(data) RemoveDeviceAction(data.entity) end
     }
 })
@@ -658,6 +665,7 @@ exports.ox_target:addModel(Config.Devices["siren"].model, {
         icon     = 'fas fa-tools',
         label    = 'Sirene reparieren',
         groups   = Config.Job,
+        distance = Config.Interaction.DistancePanel,
         onSelect = function(data) RepairDeviceAction(data.entity) end
     },
     {
@@ -665,6 +673,7 @@ exports.ox_target:addModel(Config.Devices["siren"].model, {
         icon     = 'fas fa-hammer',
         label    = 'Sirene abmontieren',
         groups   = Config.Job,
+        distance = Config.Interaction.DistancePanel,
         onSelect = function(data) RemoveDeviceAction(data.entity) end
     }
 })

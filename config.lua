@@ -31,6 +31,11 @@ Config.Placement = {
     SystemSearchRadius = 50.0,  -- Radius in dem nach Panels gesucht wird (Option C)
 }
 
+Config.Interaction = {
+    DistancePanel  = 2.0,  -- Meter für Panel-Interaktion
+    DistanceDevice = 1.5,  -- Meter für Melder/Sirene
+}
+
 Config.Devices = {
     ["panel"] = {
         label = "Fire Alarm Panel",
