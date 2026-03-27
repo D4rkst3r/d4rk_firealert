@@ -12,6 +12,7 @@ Ein realistisches Brandmeldesystem für FiveM (Hardcore RP).
 - **Alarm-Log**: Jeder Alarm und jede Quittierung wird in der Datenbank protokolliert.
 - **Dispatch-Integration**: Unterstützt `ps-dispatch`, `cd_dispatch`, oder Fallback auf ox_lib-Notify.
 - **Delta-Sync**: Geräte werden einzeln gespawnt/despawnt — kein kompletter Reload bei jeder Änderung.
+- **Sirenen-Audio**: Positions-basierter Loop-Sound mit konfigurierbarer Reichweite.
 - **Sicherheit**: Job-Checks auf allen Server-Events, Proximity-Check und Cooldown beim Alarm.
 
 ## Abhängigkeiten
@@ -47,11 +48,13 @@ add_ace group.admin command.test_bma allow
 
 ## Workflow: Neues Gebäude einrichten
 
-1. `/install_bma panel` → Panel platzieren, Gebäudenamen eingeben → System-ID merken.
-2. Am Panel: **Wartungsmodus aktivieren** → System-ID wird gespeichert.
-3. `/install_bma smoke` / `/install_bma pull` → Melder platzieren, Zonenname eingeben.
-4. Weiterer Melder → automatisch mit aktivem System verknüpft.
-5. Am Panel: **Wartungsmodus beenden**.
+1. `/install_bma panel` → Panel platzieren, Gebäudenamen + optionalen Zonenname eingeben.
+2. `/install_bma smoke` / `/install_bma pull` / `/install_bma siren` → Gerät platzieren, Zonenname eingeben.
+3. System wird **automatisch** anhand des nächsten Panels in der Nähe erkannt.
+4. Bei mehreren Panels in Reichweite erscheint ein Auswahlmenü mit Systemname + Distanz.
+5. Während der Platzierung zeigt eine blaue Linie das nächste Panel an.
+
+> **Hinweis**: Kein manueller Wartungsmodus mehr nötig — die Systemzuweisung passiert vollautomatisch per Nähe.
 
 ## Konfiguration
 
@@ -77,8 +80,14 @@ Config.Dispatch = {
 }
 
 Config.Placement = {
-    MaxDistance = 4.0,  -- Maximale Platzierungsdistanz in Metern
-    MinDistance = 0.5,
+    MaxDistance        = 4.0,   -- Maximale Platzierungsdistanz in Metern
+    MinDistance        = 0.5,
+    SystemSearchRadius = 50.0,  -- Radius für automatische Systemerkennung
+}
+
+Config.Interaction = {
+    DistancePanel  = 2.0,  -- Interaktionsreichweite für Panels
+    DistanceDevice = 1.5,  -- Interaktionsreichweite für Melder/Sirenen
 }
 ```
 
@@ -86,25 +95,30 @@ Config.Placement = {
 
 ## Changelog
 
+### v2.2.0
+- **FIX**: `DistanceDevice` wird jetzt korrekt für Melder und Sirenen genutzt (war Dead Code).
+- **FIX**: `currentSystemId` und Wartungsmodus-Menüeintrag entfernt — waren Dead Code seit Option C.
+- **FIX**: README Workflow aktualisiert — beschreibt jetzt den korrekten Option C Flow.
+- **FIX**: `lib.addCommand` mit leerem Callback ersetzt durch `RegisterCommand`.
+- **NEU**: `playAlarmSound` klar als Eingangs-Beep dokumentiert.
+- **NEU**: Version auf 2.2.0 angehoben.
+
 ### v2.1.0
-- **FIX**: Automatischer Alarm-Trigger (`triggerAutoAlarm`) ist jetzt ein separates Server-Event — Cheater können `'automatic'` als triggerType nicht mehr injecten um Proximity/Cooldown zu umgehen.
-- **FIX**: `pendingSyncs` ist jetzt ein Set statt Array — kein doppelter Sync bei mehrfachem `requestSync` vor DB-Init.
-- **FIX**: Placement-Distanz wird jetzt auf `Config.Placement.MaxDistance` geclampt — kein Fernplatzieren per Mausrad-Spam mehr.
-- **FIX**: Feedback-Notify wenn `requestSync` zu früh angefragt wird (Server noch nicht bereit).
-- **FIX**: `OpenDeviceList` nutzt jetzt `devicesBySystem[sId]`-Map statt alle spawnedObjects zu iterieren.
-- **FIX**: `math.randomseed(os.time())` im Wartungs-Loop für echte Zufälligkeit nach Restart.
-- **FIX**: `getAllDevicesWithCoords()` entfernt (Dead Code seit v2.0.0).
-- **NEU**: ACE-Permissions für `/install_bma` und `/test_bma` via `lib.addCommand`.
-- **NEU**: README vollständig aktualisiert.
+- Sirenen-Audio-Thread mit `RequestScriptAudioBank` und manuellem Distanz-Check.
+- Option C: Automatische Systemzuweisung per Nähe beim Platzieren.
+- Blaue Linie zum nächsten Panel während Placement-Modus.
+- Interaction-Range via `Config.Interaction` konfigurierbar.
+- `DistancePanel` / `DistanceDevice` Parameter für alle ox_target Einträge.
+- ACE-Permissions für `/install_bma` und `/test_bma`.
+- `math.randomseed(os.time())` für echte Zufälligkeit im Wartungs-Loop.
 
 ### v2.0.0
 - Automatische Rauchmelder-Auslösung via `GetNumberOfFiresInRange`.
 - Alarm-Log (`fire_alarm_log` Tabelle) mit Quittierungs-Protokoll.
 - Dispatch-Integration (ps-dispatch, cd_dispatch, Fallback).
 - Reparatur-System mit Item-Check (ox_inventory / qb-inventory).
-- Sirene hat jetzt Target-Optionen (Reparieren, Abmontieren).
+- Sirene hat Target-Optionen (Reparieren, Abmontieren).
 - Delta-Sync: nur neue/entfernte Geräte werden übertragen.
-- Blink-Thread nutzt Maps statt O(n) Iteration.
 - Alarmstatus überlebt Server-Restart (Status aus DB).
 - Job-Check auf `registerDevice` und `quittieren`.
 - Proximity-Check + Cooldown beim Pull-Alarm.

@@ -3,7 +3,7 @@ Config.Framework = "qbx"
 Config.Job       = "firefighter"
 
 Config.Debug   = true
-Config.Version = "2.1.0"
+Config.Version = "2.2.0"
 
 Config.Maintenance = {
     DegradeChance = 5,
@@ -32,9 +32,10 @@ Config.Placement = {
 }
 
 Config.Interaction = {
-    DistancePanel  = 2.0,  -- Meter für Panel-Interaktion
-    DistanceDevice = 1.5,  -- Meter für Melder/Sirene
+    DistancePanel  = 2.0,  -- Interaktionsreichweite für Panels
+    DistanceDevice = 1.5,  -- Interaktionsreichweite für Melder/Sirenen
 }
+
 
 Config.Devices = {
     ["panel"] = {

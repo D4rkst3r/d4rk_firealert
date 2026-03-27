@@ -147,17 +147,11 @@ end)
 -- Device registrieren
 ---------------------------------------------------------
 
--- FIX #10: lib.addCommand für ACE-Integration statt RegisterCommand
-lib.addCommand('install_bma', {
-    help   = 'BMA Gerät installieren (panel/smoke/pull/siren)',
-    params = {
-        { name = 'type', type = 'string', help = 'Gerätetyp: panel, smoke, pull, siren' }
-    },
-    restricted = false -- Job-Check passiert clientseitig + serverseitig
-}, function(source, args)
-    -- Dieser Callback läuft serverseitig, aber /install_bma öffnet nur den Client-Placement-Modus
-    -- Der eigentliche Job-Check passiert in registerDevice unten
-end)
+-- FIX #6: RegisterCommand statt lib.addCommand mit leerem Callback.
+-- /install_bma öffnet nur den Client-Placement-Modus — der Server-Callback
+-- wäre leer, da der eigentliche Job-Check in registerDevice passiert.
+-- ACE-Permission bleibt via fxmanifest registriert.
+RegisterCommand('install_bma', function() end, false)
 
 RegisterNetEvent('d4rk_firealert:server:registerDevice', function(deviceType, coords, rot, zone, systemName, manualId)
     local src = source

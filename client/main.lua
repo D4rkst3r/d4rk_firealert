@@ -1,6 +1,7 @@
 -- d4rk_firealert: client/main.lua
 spawnedObjects   = {}
-currentSystemId  = nil
+-- FIX #2: currentSystemId entfernt — war Dead Code seit Option C
+-- die Systemzuweisung passiert jetzt automatisch per Nähe in placement.lua
 local activeAlarms   = {}
 local triggeredSmoke = {}  -- { [deviceId] = true }
 
@@ -234,9 +235,11 @@ end)
 RegisterNetEvent('d4rk_firealert:client:playAlarmSound', function(coords)
     local playerCoords = GetEntityCoords(cache.ped)
     local dist = #(playerCoords - vector3(coords.x, coords.y, coords.z))
+    -- Eingangs-Alarm: einmaliger Frontend-Beep beim ersten Auslösen.
+    -- Der kontinuierliche Sirenen-Loop wird vom Sirenen-Audio-Thread übernommen.
     if dist < 80.0 then
         PlaySoundFrontend(-1, "TIMER_STOP", "HUD_MINI_GAME_SOUNDSET", 1)
-        lib.notify({ title = '🚨 BMA SIRENE', type = 'error', position = 'top' })
+        lib.notify({ title = '🚨 BMA ALARM', type = 'error', position = 'top' })
     end
 end)
 
@@ -328,16 +331,11 @@ CreateThread(function()
 end)
 
 -- Sirenen-Audio-Thread
--- Soundbank muss mit RequestScriptAudioBank geladen werden,
--- sonst liefert PlaySoundFromCoord Stille auch wenn der Sound existiert.
--- Manueller Distanz-Check vor dem Abspielen da range-Parameter bei
--- isNetwork=false von GTA ignoriert wird.
 CreateThread(function()
-    local SOUND_NAME  = "Altitude_Warning"
-    local SOUND_SET   = "EXILE_1"
-    local INTERVAL_MS = 2500  -- Sound ist ~2.5s lang
-    local RANGE       = 40
-
+        local SOUND_NAME  = "Altitude_Warning"
+        local SOUND_SET   = "EXILE_1"
+        local INTERVAL_MS = 2500  -- Sound ist ~2.5s lang
+        local RANGE       = 40
 
     -- Soundbank vorab laden — ohne das kein Sound
     RequestScriptAudioBank(SOUND_SET, false)
@@ -539,32 +537,6 @@ local function OpenBMAMenu(entity)
                 end
             },
             {
-                title       = 'Wartungsmodus',
-                description = (currentSystemId == sId)
-                    and '✅ AKTIV - Du kannst Melder koppeln'
-                    or  '❌ INAKTIV - Klicke zum Starten',
-                icon        = 'wrench',
-                onSelect    = function()
-                    if currentSystemId and currentSystemId ~= sId then
-                        lib.notify({
-                            title       = 'BMA',
-                            description = 'Beende erst die Wartung an System ' .. currentSystemId .. '!',
-                            type        = 'error'
-                        })
-                        return
-                    end
-
-                    if currentSystemId == sId then
-                        currentSystemId = nil
-                        lib.notify({ title = 'BMA', description = 'Wartungsmodus beendet.', type = 'inform' })
-                    else
-                        currentSystemId = sId
-                        lib.notify({ title = 'BMA', description = 'Wartung aktiv. Neue Geräte → ID ' .. sId, type = 'success' })
-                    end
-                    OpenBMAMenu(entity)
-                end
-            },
-            {
                 title       = 'Alarm quittieren (ACK)',
                 description = 'Stoppt Sirenen und Blinken',
                 icon        = 'bell-slash',
@@ -612,7 +584,8 @@ exports.ox_target:addModel(Config.Devices["pull"].model, {
         name     = 'pull_alarm',
         icon     = 'fas fa-hand-rock',
         label    = 'Alarm auslösen',
-        distance = Config.Interaction.DistancePanel,
+        -- FIX #1: DistanceDevice statt DistancePanel (war Dead Code)
+        distance = Config.Interaction.DistanceDevice,
         onSelect = function(data)
             local sId    = Entity(data.entity).state.systemId
             local zone   = Entity(data.entity).state.zoneName or "Manueller Melder"
@@ -627,7 +600,7 @@ exports.ox_target:addModel(Config.Devices["pull"].model, {
         icon     = 'fas fa-tools',
         label    = 'Melder reparieren',
         groups   = Config.Job,
-        distance = Config.Interaction.DistancePanel,
+        distance = Config.Interaction.DistanceDevice,
         onSelect = function(data) RepairDeviceAction(data.entity) end
     },
     {
@@ -635,7 +608,7 @@ exports.ox_target:addModel(Config.Devices["pull"].model, {
         icon     = 'fas fa-hammer',
         label    = 'Melder abmontieren',
         groups   = Config.Job,
-        distance = Config.Interaction.DistancePanel,
+        distance = Config.Interaction.DistanceDevice,
         onSelect = function(data) RemoveDeviceAction(data.entity) end
     }
 })
@@ -646,7 +619,7 @@ exports.ox_target:addModel(Config.Devices["smoke"].model, {
         icon     = 'fas fa-tools',
         label    = 'Rauchmelder reparieren',
         groups   = Config.Job,
-        distance = Config.Interaction.DistancePanel,
+        distance = Config.Interaction.DistanceDevice,
         onSelect = function(data) RepairDeviceAction(data.entity) end
     },
     {
@@ -654,7 +627,7 @@ exports.ox_target:addModel(Config.Devices["smoke"].model, {
         icon     = 'fas fa-hammer',
         label    = 'Rauchmelder abmontieren',
         groups   = Config.Job,
-        distance = Config.Interaction.DistancePanel,
+        distance = Config.Interaction.DistanceDevice,
         onSelect = function(data) RemoveDeviceAction(data.entity) end
     }
 })
@@ -665,7 +638,7 @@ exports.ox_target:addModel(Config.Devices["siren"].model, {
         icon     = 'fas fa-tools',
         label    = 'Sirene reparieren',
         groups   = Config.Job,
-        distance = Config.Interaction.DistancePanel,
+        distance = Config.Interaction.DistanceDevice,
         onSelect = function(data) RepairDeviceAction(data.entity) end
     },
     {
@@ -673,7 +646,7 @@ exports.ox_target:addModel(Config.Devices["siren"].model, {
         icon     = 'fas fa-hammer',
         label    = 'Sirene abmontieren',
         groups   = Config.Job,
-        distance = Config.Interaction.DistancePanel,
+        distance = Config.Interaction.DistanceDevice,
         onSelect = function(data) RemoveDeviceAction(data.entity) end
     }
 })
