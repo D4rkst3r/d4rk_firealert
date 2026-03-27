@@ -1,22 +1,33 @@
 -- d4rk_firealert: server/database.lua
 db = {}
 
+---------------------------------------------------------
+-- Systeme
+---------------------------------------------------------
+
 function db.createSystem(name, coords)
     return MySQL.insert.await('INSERT INTO fire_systems (name, coords) VALUES (?, ?)', {
         name, json.encode(coords)
     })
 end
 
-function db.addDevice(systemId, type, coords, rot, zone)
-    return MySQL.insert.await(
-        'INSERT INTO fire_devices (system_id, type, coords, rotation, zone) VALUES (?, ?, ?, ?, ?)', {
-            systemId, type, json.encode(coords), json.encode(rot), zone
-        }
-    )
-end
-
 function db.getAllSystems()
     return MySQL.query.await('SELECT * FROM fire_systems')
+end
+
+function db.updateSystemStatus(systemId, status)
+    MySQL.update('UPDATE fire_systems SET status = ? WHERE id = ?', { status, systemId })
+end
+
+---------------------------------------------------------
+-- Geräte
+---------------------------------------------------------
+
+function db.addDevice(systemId, type, coords, rot, zone)
+    return MySQL.insert.await(
+        'INSERT INTO fire_devices (system_id, type, coords, rotation, zone) VALUES (?, ?, ?, ?, ?)',
+        { systemId, type, json.encode(coords), json.encode(rot), zone }
+    )
 end
 
 function db.getAllDevices()
@@ -27,34 +38,54 @@ function db.getDevicesBySystem(systemId)
     return MySQL.query.await('SELECT * FROM fire_devices WHERE system_id = ?', { systemId })
 end
 
--- FIX #3: Für Reparatur-Logik (Trouble-Reset nach Reparatur)
 function db.getDeviceById(deviceId)
     local result = MySQL.query.await('SELECT * FROM fire_devices WHERE id = ?', { deviceId })
     return result and result[1] or nil
 end
 
+-- FIX #4: system_id jetzt mit dabei (wurde beim Reparatur-Trouble-Reset benötigt)
 function db.getAllDevicesWithCoords()
-    return MySQL.query.await('SELECT id, coords FROM fire_devices')
+    return MySQL.query.await('SELECT id, system_id, coords FROM fire_devices')
 end
 
--- FIX #3: Health auf 100 setzen + last_service aktualisieren
 function db.updateDeviceHealth(deviceId, newHealth)
     MySQL.update('UPDATE fire_devices SET health = ?, last_service = CURRENT_TIMESTAMP WHERE id = ?', {
         newHealth, deviceId
     })
 end
 
-function db.updateSystemStatus(systemId, status)
-    MySQL.update('UPDATE fire_systems SET status = ? WHERE id = ?', {
-        status, systemId
-    })
-end
-
--- FIX #4: Systeme mit Geräten unter 20% Health
 function db.getTroubledDevices()
     return MySQL.query.await('SELECT DISTINCT system_id FROM fire_devices WHERE health < 20')
 end
 
 function db.removeDevice(deviceId)
     return MySQL.update.await('DELETE FROM fire_devices WHERE id = ?', { deviceId })
+end
+
+---------------------------------------------------------
+-- FIX #2: Alarm-Log
+---------------------------------------------------------
+
+-- Alarm in Log eintragen
+function db.logAlarm(systemId, systemName, zone, triggerType)
+    return MySQL.insert.await(
+        'INSERT INTO fire_alarm_log (system_id, system_name, zone, trigger_type) VALUES (?, ?, ?, ?)',
+        { systemId, systemName, zone, triggerType or 'manual' }
+    )
+end
+
+-- Alarm-Quittierung in Log eintragen
+function db.logAcknowledge(systemId, playerName)
+    MySQL.update(
+        'UPDATE fire_alarm_log SET acknowledged_at = CURRENT_TIMESTAMP, acknowledged_by = ? WHERE system_id = ? AND acknowledged_at IS NULL ORDER BY triggered_at DESC LIMIT 1',
+        { playerName, systemId }
+    )
+end
+
+-- Letzte X Einträge für ein System holen (für zukünftige Anzeige im Panel-Menü)
+function db.getAlarmLog(systemId, limit)
+    return MySQL.query.await(
+        'SELECT * FROM fire_alarm_log WHERE system_id = ? ORDER BY triggered_at DESC LIMIT ?',
+        { systemId, limit or 10 }
+    )
 end

@@ -1,48 +1,99 @@
 -- d4rk_firealert: client/main.lua
 spawnedObjects  = {}
 currentSystemId = nil
-local activeAlarms = {}
+local activeAlarms  = {}
+local triggeredSmoke = {} -- FIX #1: { [deviceId] = true } — verhindert Doppel-Auslösung
 
--- FIX #7: Separate Tracking-Maps für Panel und Sirenen
--- Statt alle spawnedObjects zu iterieren greifen wir direkt auf die richtigen Objekte zu
+-- Tracking-Maps für O(1) Zugriff
 local panelObjects = {}  -- { [systemId] = entity }
 local sirenObjects = {}  -- { [systemId] = { entity, ... } }
+local smokeObjects = {}  -- { [systemId] = { entity, ... } } — FIX #1: für Auto-Auslösung
 
 local DeviceLabels = {
-    [GetHashKey('prop_fire_alarm_03')]               = { label = 'Rauchmelder',     icon = 'wind'          },
-    [GetHashKey('prop_fire_alarm_01')]               = { label = 'Handfeuermelder', icon = 'hand-point-up' },
-    [GetHashKey('m23_1_prop_m31_controlpanel_02a')]  = { label = 'Zentrale',        icon = 'terminal'      },
-    [GetHashKey('prop_fire_alarm_02')]               = { label = 'Sirene',          icon = 'bell'          },
+    [GetHashKey('prop_fire_alarm_03')]              = { label = 'Rauchmelder',     icon = 'wind'          },
+    [GetHashKey('prop_fire_alarm_01')]              = { label = 'Handfeuermelder', icon = 'hand-point-up' },
+    [GetHashKey('m23_1_prop_m31_controlpanel_02a')] = { label = 'Zentrale',        icon = 'terminal'      },
+    [GetHashKey('prop_fire_alarm_02')]              = { label = 'Sirene',          icon = 'bell'          },
 }
 
 ---------------------------------------------------------
--- Hilfsfunktionen
+-- Tracking
 ---------------------------------------------------------
 
--- Prop in alle Tracking-Strukturen eintragen
 local function TrackProp(obj, data)
     local sId = data.system_id
-    if GetEntityModel(obj) == Config.Devices["panel"].model then
+    local dId = data.id
+    local model = GetEntityModel(obj)
+
+    if model == Config.Devices["panel"].model then
         panelObjects[sId] = obj
-    elseif GetEntityModel(obj) == Config.Devices["siren"].model then
+
+    elseif model == Config.Devices["siren"].model then
         if not sirenObjects[sId] then sirenObjects[sId] = {} end
         table.insert(sirenObjects[sId], obj)
+
+    elseif model == Config.Devices["smoke"].model then
+        if not smokeObjects[sId] then smokeObjects[sId] = {} end
+        table.insert(smokeObjects[sId], { obj = obj, deviceId = dId, zone = data.zone })
     end
 end
 
--- Prop aus allen Tracking-Strukturen entfernen
 local function UntrackProp(obj)
-    local sId = Entity(obj).state.systemId
+    local state = Entity(obj).state
+    local sId   = state.systemId
+    local dId   = state.deviceId
+
     if panelObjects[sId] == obj then panelObjects[sId] = nil end
+
     if sirenObjects[sId] then
         for i, s in ipairs(sirenObjects[sId]) do
             if s == obj then table.remove(sirenObjects[sId], i) break end
         end
     end
+
+    if smokeObjects[sId] then
+        for i, s in ipairs(smokeObjects[sId]) do
+            if s.obj == obj then table.remove(smokeObjects[sId], i) break end
+        end
+    end
+
+    triggeredSmoke[dId] = nil
+
     for i, o in ipairs(spawnedObjects) do
         if o == obj then table.remove(spawnedObjects, i) break end
     end
 end
+
+---------------------------------------------------------
+-- Prop erstellen
+---------------------------------------------------------
+
+function CreateBMAProp(data)
+    if not Config.Devices[data.type] then return end
+
+    local model  = Config.Devices[data.type].model
+    local coords = type(data.coords)   == "string" and json.decode(data.coords)   or data.coords
+    local rot    = type(data.rotation) == "string" and json.decode(data.rotation) or data.rotation
+
+    lib.requestModel(model)
+    local obj = CreateObject(model, coords.x, coords.y, coords.z, false, false, false)
+
+    Entity(obj).state:set('systemId',     data.system_id,    true)
+    Entity(obj).state:set('zoneName',     data.zone,         true)
+    Entity(obj).state:set('deviceId',     data.id,           true)
+    Entity(obj).state:set('deviceHealth', data.health or 100, true)
+
+    SetEntityRotation(obj, rot.x, rot.y, rot.z, 2, true)
+    FreezeEntityPosition(obj, true)
+    SetEntityInvincible(obj, true)
+    table.insert(spawnedObjects, obj)
+
+    TrackProp(obj, data)
+end
+
+---------------------------------------------------------
+-- Aktionen
+---------------------------------------------------------
 
 function RemoveDeviceAction(entity)
     local alert = lib.alertDialog({
@@ -62,19 +113,17 @@ function RemoveDeviceAction(entity)
         })
 
         if progress then
-            local coords = GetEntityCoords(entity)
-            TriggerServerEvent('d4rk_firealert:server:removeDevice', coords)
-            DeleteEntity(entity)
+            -- FIX #6: deviceId direkt aus State Bag — kein Koordinaten-Scan mehr
+            local deviceId = Entity(entity).state.deviceId
+            TriggerServerEvent('d4rk_firealert:server:removeDevice', deviceId)
         end
     end
 end
 
--- FIX #3: Reparatur-Logik als eigene Funktion
 local function RepairDeviceAction(entity)
-    -- FIX #3: Health aus State Bag prüfen bevor Reparatur gestartet wird
     local health = Entity(entity).state.deviceHealth or 100
     if health >= 100 then
-        lib.notify({ title = 'BMA', description = 'Dieses Gerät ist voll funktionsfähig.', type = 'inform' })
+        lib.notify({ title = 'BMA', description = 'Gerät ist voll funktionsfähig.', type = 'inform' })
         return
     end
 
@@ -92,43 +141,27 @@ local function RepairDeviceAction(entity)
     end
 end
 
-function CreateBMAProp(data)
-    local model  = Config.Devices[data.type].model
-    local coords = type(data.coords)   == "string" and json.decode(data.coords)   or data.coords
-    local rot    = type(data.rotation) == "string" and json.decode(data.rotation) or data.rotation
-
-    lib.requestModel(model)
-    local obj = CreateObject(model, coords.x, coords.y, coords.z, false, false, false)
-
-    -- FIX #6 (Delta-Sync): deviceId in State Bag für gezieltes Entfernen ohne vollen Resync
-    -- FIX #3 (Repair): deviceHealth in State Bag für Client-seitigen Health-Check
-    Entity(obj).state:set('systemId',     data.system_id,    true)
-    Entity(obj).state:set('zoneName',     data.zone,         true)
-    Entity(obj).state:set('deviceId',     data.id,           true)
-    Entity(obj).state:set('deviceHealth', data.health or 100, true)
-
-    SetEntityRotation(obj, rot.x, rot.y, rot.z, 2, true)
-    FreezeEntityPosition(obj, true)
-    SetEntityInvincible(obj, true)
-    table.insert(spawnedObjects, obj)
-
-    TrackProp(obj, data)
-end
-
 ---------------------------------------------------------
--- Events & Threads
+-- Events
 ---------------------------------------------------------
 
 RegisterNetEvent('d4rk_firealert:client:updateSystemStatus', function(systemId, status)
-    activeAlarms[tonumber(systemId)] = (status == 'alarm')
+    local id = tonumber(systemId)
+    activeAlarms[id] = (status == 'alarm')
+
     if status == 'normal' then
         lib.notify({ title = 'BMA', description = 'System ' .. systemId .. ' wurde quittiert.', type = 'inform' })
+        -- Rauchmelder-Sperren des Systems zurücksetzen damit sie nach Quittierung wieder auslösen können
+        if smokeObjects[id] then
+            for _, s in ipairs(smokeObjects[id]) do
+                triggeredSmoke[s.deviceId] = nil
+            end
+        end
     elseif status == 'trouble' then
         lib.notify({ title = 'BMA STÖRUNG', description = 'System ' .. systemId .. ' meldet einen Gerätedefekt!', type = 'warning' })
     end
 end)
 
--- FIX #3: Health-Update vom Server nach Reparatur (aktualisiert State Bag ohne vollen Resync)
 RegisterNetEvent('d4rk_firealert:client:updateDeviceHealth', function(deviceId, newHealth)
     for _, obj in ipairs(spawnedObjects) do
         if DoesEntityExist(obj) and Entity(obj).state.deviceId == deviceId then
@@ -138,12 +171,12 @@ RegisterNetEvent('d4rk_firealert:client:updateDeviceHealth', function(deviceId, 
     end
 end)
 
--- FIX #6: Delta-Sync — nur das neue Gerät empfangen statt komplette Liste
+-- Delta-Sync: neues Gerät
 RegisterNetEvent('d4rk_firealert:client:addDevice', function(data)
     CreateBMAProp(data)
 end)
 
--- FIX #6: Delta-Sync — einzelnes Gerät per deviceId entfernen
+-- Delta-Sync: Gerät entfernen
 RegisterNetEvent('d4rk_firealert:client:removeDevice', function(deviceId)
     for _, obj in ipairs(spawnedObjects) do
         if DoesEntityExist(obj) and Entity(obj).state.deviceId == deviceId then
@@ -154,8 +187,56 @@ RegisterNetEvent('d4rk_firealert:client:removeDevice', function(deviceId)
     end
 end)
 
--- FIX #7: Blink-Thread nutzt panelObjects und sirenObjects Maps
--- Statt O(n) über alle Objekte ist der Zugriff jetzt O(1) pro System
+RegisterNetEvent('d4rk_firealert:client:playAlarmSound', function(coords)
+    local playerCoords = GetEntityCoords(cache.ped)
+    local dist = #(playerCoords - vector3(coords.x, coords.y, coords.z))
+
+    if dist < 80.0 then
+        PlaySoundFrontend(-1, "TIMER_STOP", "HUD_MINI_GAME_SOUNDSET", 1)
+        lib.notify({ title = '🚨 BMA SIRENE', type = 'error', position = 'top' })
+    end
+end)
+
+-- Alarm-Log vom Server empfangen und anzeigen
+RegisterNetEvent('d4rk_firealert:client:receiveAlarmLog', function(logEntries)
+    if not logEntries or #logEntries == 0 then
+        lib.notify({ title = 'Alarm-Log', description = 'Keine Einträge vorhanden.', type = 'inform' })
+        return
+    end
+
+    local options = {}
+    for _, entry in ipairs(logEntries) do
+        local timeStr = entry.triggered_at or "Unbekannt"
+        local ackStr  = entry.acknowledged_by
+            and ('✅ ' .. entry.acknowledged_by)
+            or  '❌ Nicht quittiert'
+
+        local typeIcon = entry.trigger_type == 'automatic' and '🤖' or (entry.trigger_type == 'test' and '🔧' or '👤')
+
+        table.insert(options, {
+            title       = typeIcon .. ' ' .. entry.zone,
+            description = timeStr,
+            metadata    = {
+                { label = 'Typ',          value = entry.trigger_type },
+                { label = 'Quittierung',  value = ackStr },
+            }
+        })
+    end
+
+    lib.registerContext({
+        id      = 'bma_alarm_log',
+        title   = 'Alarm-Protokoll (letzte 10)',
+        menu    = 'bma_main_menu',
+        options = options
+    })
+    lib.showContext('bma_alarm_log')
+end)
+
+---------------------------------------------------------
+-- Threads
+---------------------------------------------------------
+
+-- Blink-Thread: nur Panels und Sirenen aus den Maps
 CreateThread(function()
     while true do
         local sleep    = 1500
@@ -166,7 +247,6 @@ CreateThread(function()
                 hasAlarm = true
                 sleep    = 500
 
-                -- Panel blinken
                 local panel = panelObjects[sId]
                 if panel and DoesEntityExist(panel) then
                     SetEntityDrawOutline(panel, true)
@@ -175,7 +255,6 @@ CreateThread(function()
                     DrawLightWithRange(c.x, c.y, c.z, 255, 0, 0, 1.2, 50.0)
                 end
 
-                -- Sirenen blinken (vorher nie implementiert)
                 if sirenObjects[sId] then
                     for _, siren in ipairs(sirenObjects[sId]) do
                         if DoesEntityExist(siren) then
@@ -190,14 +269,13 @@ CreateThread(function()
         end
 
         if not hasAlarm then
-            -- FIX #5: Alle Outlines sauber zurücksetzen
-            for sId, panel in pairs(panelObjects) do
+            for _, panel in pairs(panelObjects) do
                 if DoesEntityExist(panel) then
                     SetEntityDrawOutline(panel, false)
                     SetEntityDrawOutlineColor(255, 255, 255, 0)
                 end
             end
-            for sId, sirens in pairs(sirenObjects) do
+            for _, sirens in pairs(sirenObjects) do
                 for _, siren in ipairs(sirens) do
                     if DoesEntityExist(siren) then
                         SetEntityDrawOutline(siren, false)
@@ -210,6 +288,53 @@ CreateThread(function()
         Wait(sleep)
     end
 end)
+
+-- FIX #1: Automatische Rauchmelder-Auslösung via GetNumberOfFiresInRange
+CreateThread(function()
+    if not Config.AutoSmoke.Enabled then return end
+
+    while true do
+        Wait(Config.AutoSmoke.CheckInterval * 1000)
+
+        for sId, smokeList in pairs(smokeObjects) do
+            -- Nur prüfen wenn System NICHT schon im Alarm ist
+            if not activeAlarms[sId] then
+                for _, smokeData in ipairs(smokeList) do
+                    if DoesEntityExist(smokeData.obj) and not triggeredSmoke[smokeData.deviceId] then
+                        local smokeCoords = GetEntityCoords(smokeData.obj)
+                        local fireCount   = GetNumberOfFiresInRange(smokeCoords.x, smokeCoords.y, smokeCoords.z, Config.AutoSmoke.CheckRadius)
+
+                        if fireCount > 0 then
+                            triggeredSmoke[smokeData.deviceId] = true
+
+                            lib.notify({
+                                title       = '🔥 Rauchmelder ausgelöst',
+                                description = 'Zone: ' .. (smokeData.zone or 'Unbekannt'),
+                                type        = 'error',
+                                position    = 'top'
+                            })
+
+                            -- FIX #1: triggerType 'automatic' mitsenden → Server überspringt Proximity/Cooldown-Check
+                            TriggerServerEvent(
+                                'd4rk_firealert:server:triggerAlarm',
+                                sId,
+                                smokeData.zone or 'Automatischer Rauchmelder',
+                                nil,        -- keine deviceCoords nötig (kein Proximity-Check bei automatic)
+                                'automatic'
+                            )
+
+                            break -- Pro System nur einmal pro Check auslösen
+                        end
+                    end
+                end
+            end
+        end
+    end
+end)
+
+---------------------------------------------------------
+-- Menüs
+---------------------------------------------------------
 
 local function OpenDeviceList(sId)
     local deviceElements = {}
@@ -226,14 +351,10 @@ local function OpenDeviceList(sId)
                 local model      = GetEntityModel(obj)
                 local deviceInfo = DeviceLabels[model] or { label = 'Unbekannt', icon = 'microchip' }
 
-                -- Health-Farbe für schnelle visuelle Übersicht
                 local healthStr
-                if health >= 75 then
-                    healthStr = '🟢 ' .. health .. '%'
-                elseif health >= 30 then
-                    healthStr = '🟡 ' .. health .. '%'
-                else
-                    healthStr = '🔴 ' .. health .. '%'
+                if health >= 75 then     healthStr = '🟢 ' .. health .. '%'
+                elseif health >= 30 then healthStr = '🟡 ' .. health .. '%'
+                else                     healthStr = '🔴 ' .. health .. '%'
                 end
 
                 table.insert(deviceElements, {
@@ -248,7 +369,7 @@ local function OpenDeviceList(sId)
                     onSelect = function()
                         SetEntityDrawOutline(obj, true)
                         SetEntityDrawOutlineColor(0, 255, 0, 255)
-                        lib.notify({ description = 'Gerät in ' .. zone .. ' wurde markiert.', type = 'inform' })
+                        lib.notify({ description = 'Gerät in ' .. zone .. ' markiert.', type = 'inform' })
                         Wait(3000)
                         SetEntityDrawOutline(obj, false)
                         SetEntityDrawOutlineColor(255, 255, 255, 0)
@@ -281,9 +402,17 @@ local function OpenBMAMenu(entity)
         options = {
             {
                 title       = 'Verbundene Geräte',
-                description = 'Zeigt alle Melder inkl. Health-Status an.',
+                description = 'Alle Melder inkl. Health-Status.',
                 icon        = 'list-check',
                 onSelect    = function() OpenDeviceList(sId) end
+            },
+            {
+                title       = 'Alarm-Protokoll',
+                description = 'Letzte 10 Alarm-Ereignisse dieses Systems.',
+                icon        = 'clipboard-list',
+                onSelect    = function()
+                    TriggerServerEvent('d4rk_firealert:server:getAlarmLog', sId)
+                end
             },
             {
                 title       = 'Wartungsmodus',
@@ -292,12 +421,23 @@ local function OpenBMAMenu(entity)
                     or  '❌ INAKTIV - Klicke zum Starten',
                 icon        = 'wrench',
                 onSelect    = function()
+                    -- FIX #5: Doppel-Panel-Schutz — currentSystemId kann nicht überschrieben werden
+                    -- wenn ein anderes System bereits aktiv ist
+                    if currentSystemId and currentSystemId ~= sId then
+                        lib.notify({
+                            title       = 'BMA',
+                            description = 'Beende erst die Wartung an System ' .. currentSystemId .. '!',
+                            type        = 'error'
+                        })
+                        return
+                    end
+
                     if currentSystemId == sId then
                         currentSystemId = nil
                         lib.notify({ title = 'BMA', description = 'Wartungsmodus beendet.', type = 'inform' })
                     else
                         currentSystemId = sId
-                        lib.notify({ title = 'BMA', description = 'Wartung aktiv. Neue Geräte gehören nun zu ID ' .. sId, type = 'success' })
+                        lib.notify({ title = 'BMA', description = 'Wartung aktiv. Neue Geräte → ID ' .. sId, type = 'success' })
                     end
                     OpenBMAMenu(entity)
                 end
@@ -351,15 +491,13 @@ exports.ox_target:addModel(Config.Devices["pull"].model, {
         onSelect = function(data)
             local sId    = Entity(data.entity).state.systemId
             local zone   = Entity(data.entity).state.zoneName or "Manueller Melder"
-            -- FIX #1: Gerät-Coords mitsenden damit Server Proximity prüfen kann
             local coords = GetEntityCoords(data.entity)
             if sId then
-                TriggerServerEvent('d4rk_firealert:server:triggerAlarm', sId, zone, coords)
+                TriggerServerEvent('d4rk_firealert:server:triggerAlarm', sId, zone, coords, 'manual')
             end
         end
     },
     {
-        -- FIX #3: Reparatur-Option an Pull-Meldern
         name     = 'repair_device_pull',
         icon     = 'fas fa-tools',
         label    = 'Melder reparieren',
@@ -377,7 +515,6 @@ exports.ox_target:addModel(Config.Devices["pull"].model, {
 
 exports.ox_target:addModel(Config.Devices["smoke"].model, {
     {
-        -- FIX #3: Reparatur-Option an Rauchmeldern
         name     = 'repair_device_smoke',
         icon     = 'fas fa-tools',
         label    = 'Rauchmelder reparieren',
@@ -393,8 +530,14 @@ exports.ox_target:addModel(Config.Devices["smoke"].model, {
     }
 })
 
--- FIX #5: Sirene hat jetzt ein Target (vorher komplett fehlend)
 exports.ox_target:addModel(Config.Devices["siren"].model, {
+    {
+        name     = 'repair_device_siren',
+        icon     = 'fas fa-tools',
+        label    = 'Sirene reparieren',
+        groups   = Config.Job,
+        onSelect = function(data) RepairDeviceAction(data.entity) end
+    },
     {
         name     = 'remove_device_siren',
         icon     = 'fas fa-hammer',
@@ -409,26 +552,22 @@ exports.ox_target:addModel(Config.Devices["siren"].model, {
 ---------------------------------------------------------
 
 RegisterNetEvent('d4rk_firealert:client:loadInitialDevices', function(devices)
-    -- Alles aufräumen
     for _, obj in ipairs(spawnedObjects) do
         if DoesEntityExist(obj) then DeleteEntity(obj) end
     end
-    spawnedObjects = {}
-    panelObjects   = {}
-    sirenObjects   = {}
-    activeAlarms   = {}
+    spawnedObjects  = {}
+    panelObjects    = {}
+    sirenObjects    = {}
+    smokeObjects    = {}
+    activeAlarms    = {}
+    triggeredSmoke  = {}
 
     for _, data in ipairs(devices) do CreateBMAProp(data) end
 end)
 
-RegisterNetEvent('d4rk_firealert:client:playAlarmSound', function(coords)
-    local playerCoords = GetEntityCoords(cache.ped)
-    local dist = #(playerCoords - vector3(coords.x, coords.y, coords.z))
-
-    if dist < 50.0 then
-        PlaySoundFrontend(-1, "TIMER_STOP", "HUD_MINI_GAME_SOUNDSET", 1)
-        lib.notify({ title = 'BMA SIRENE', type = 'error', position = 'top' })
-    end
+AddEventHandler('onResourceStart', function(resourceName)
+    if GetCurrentResourceName() ~= resourceName then return end
+    TriggerServerEvent('d4rk_firealert:server:requestSync')
 end)
 
 AddEventHandler('onResourceStop', function(resourceName)
@@ -444,11 +583,5 @@ AddEventHandler('onResourceStop', function(resourceName)
     end
 
     lib.hideTextUI()
-    print("^1[d4rk_firealert] Client-seitige Props beim Restart bereinigt.^7")
-end)
-
--- FIX #9: Kein Wait(1000) mehr — Server signalisiert selbst wenn er bereit ist
-AddEventHandler('onResourceStart', function(resourceName)
-    if GetCurrentResourceName() ~= resourceName then return end
-    TriggerServerEvent('d4rk_firealert:server:requestSync')
+    print("^1[d4rk_firealert] Client-seitige Props bereinigt.^7")
 end)
