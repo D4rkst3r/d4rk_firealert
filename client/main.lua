@@ -1,7 +1,13 @@
-local spawnedObjects = {}
+spawnedObjects = {} -- Nicht lokal, damit andere Dateien darauf zugreifen können
+currentSystemId = nil -- Global für dieses Script (Wartungsmodus)
+local activeAlarms = {}
 
--- Hilfsfunktion: Gerät abmontieren (für alle Gerätetypen gleich)
-local function RemoveDeviceAction(entity)
+---------------------------------------------------------
+-- Hilfsfunktionen
+---------------------------------------------------------
+
+-- Gerät abmontieren Logik
+function RemoveDeviceAction(entity)
     local alert = lib.alertDialog({
         header = 'Gerät entfernen?',
         content = 'Möchtest du dieses BMA-Gerät wirklich dauerhaft entfernen?',
@@ -20,66 +26,109 @@ local function RemoveDeviceAction(entity)
 
         if progress then
             local coords = GetEntityCoords(entity)
-            -- Trigger an Server zum Löschen aus DB
             TriggerServerEvent('d4rk_firealert:server:removeDevice', coords)
             DeleteEntity(entity)
         end
     end
 end
 
--- Funktion zum Erstellen der permanenten Props
-local function CreateBMAProp(data)
+-- Hilfsfunktion zum Spawnen (Wichtig für State Bags)
+function CreateBMAProp(data)
     local model = Config.Devices[data.type].model
     local coords = type(data.coords) == "string" and json.decode(data.coords) or data.coords
     local rot = type(data.rotation) == "string" and json.decode(data.rotation) or data.rotation
 
     lib.requestModel(model)
     local obj = CreateObject(model, coords.x, coords.y, coords.z, false, false, false)
-    
-    -- State Bag setzen
     Entity(obj).state:set('systemId', data.system_id, true)
-    Entity(obj).state:set('zoneName', data.zone or "Unbekannt", true)
+    Entity(obj).state:set('zoneName', data.zone, true)
     
     SetEntityRotation(obj, rot.x, rot.y, rot.z, 2, true)
     FreezeEntityPosition(obj, true)
     SetEntityInvincible(obj, true)
-    
     table.insert(spawnedObjects, obj)
 end
 
--- Event zum Laden aller Props
-RegisterNetEvent('d4rk_firealert:client:loadInitialDevices', function(devices)
-    for _, obj in ipairs(spawnedObjects) do
-        if DoesEntityExist(obj) then DeleteEntity(obj) end
-    end
-    spawnedObjects = {}
+---------------------------------------------------------
+-- Events & Threads
+---------------------------------------------------------
 
-    for _, data in ipairs(devices) do
-        CreateBMAProp(data)
+-- Event: Status-Update vom Server (Alarm an/aus)
+RegisterNetEvent('d4rk_firealert:client:updateSystemStatus', function(systemId, status)
+    activeAlarms[tonumber(systemId)] = (status == 'alarm')
+    if status == 'normal' then
+        lib.notify({title = 'BMA', description = 'System '..systemId..' wurde quittiert.', type = 'inform'})
     end
 end)
 
--- BMA Menü Logik
+-- Blink-Thread für Alarm-Optik
+CreateThread(function()
+    while true do
+        local sleep = 1500
+        local hasAlarm = false
+        
+        for sId, isAlarm in pairs(activeAlarms) do
+            if isAlarm then
+                hasAlarm = true
+                sleep = 500
+                for _, obj in ipairs(spawnedObjects) do
+                    if DoesEntityExist(obj) and Entity(obj).state.systemId == sId then
+                        -- Nur das Panel blinkt
+                        if GetEntityModel(obj) == GetHashKey(Config.Devices["panel"].model) then
+                            SetEntityDrawOutline(obj, true)
+                            SetEntityDrawOutlineColor(255, 0, 0, 255)
+                            local c = GetEntityCoords(obj)
+                            DrawLightWithRange(c.x, c.y, c.z, 255, 0, 0, 1.2, 50.0)
+                        end
+                    end
+                end
+            end
+        end
+
+        if not hasAlarm then
+            for _, obj in ipairs(spawnedObjects) do SetEntityDrawOutline(obj, false) end
+        end
+        Wait(sleep)
+    end
+end)
+
+-- Das Hauptmenü am Panel
 local function OpenBMAMenu(entity)
     local sId = Entity(entity).state.systemId
-    
+    if not sId then return end
+
     lib.registerContext({
         id = 'bma_main_menu',
-        title = 'BMA Zentrale - ID: ' .. (sId or "???"),
+        title = 'BMA Zentrale - ID: ' .. sId,
         options = {
             {
-                title = 'Status prüfen',
-                description = 'Alle Melder online. System ID: ' .. (sId or "NA"),
-                icon = 'microchip',
+                title = 'Wartungsmodus',
+                description = (currentSystemId == sId) and '✅ AKTIV - Du kannst Melder koppeln' or '❌ INAKTIV - Klicke zum Starten',
+                icon = 'wrench',
                 onSelect = function()
-                    lib.notify({ title = 'System-Check', description = 'System arbeitet normal.', type = 'success' })
+                    if currentSystemId == sId then
+                        currentSystemId = nil
+                        lib.notify({ title = 'BMA', description = 'Wartungsmodus beendet.', type = 'inform' })
+                    else
+                        currentSystemId = sId
+                        lib.notify({ title = 'BMA', description = 'Wartung aktiv. Neue Geräte gehören nun zu ID '..sId, type = 'success' })
+                    end
+                    OpenBMAMenu(entity)
                 end
             },
             {
                 title = 'Alarm quittieren (ACK)',
+                description = 'Stoppt Sirenen und Blinken',
                 icon = 'bell-slash',
                 onSelect = function()
-                    lib.notify({ title = 'BMA', description = 'Alarm wurde quittiert.', type = 'inform' })
+                    TriggerServerEvent('d4rk_firealert:server:quittieren', sId)
+                end
+            },
+            {
+                title = 'Status prüfen',
+                icon = 'microchip',
+                onSelect = function()
+                    lib.notify({ title = 'System-Check', description = 'Alle Komponenten innerhalb der Toleranz.', type = 'success' })
                 end
             }
         }
@@ -138,7 +187,7 @@ exports.ox_target:addModel(Config.Devices["pull"].model, {
     }
 })
 
--- 3. Rauchmelder (Smoke) - Hier auch das Abmontieren hinzufügen
+-- 3. Rauchmelder (Smoke)
 exports.ox_target:addModel(Config.Devices["smoke"].model, {
     {
         name = 'remove_device_smoke',
@@ -152,8 +201,14 @@ exports.ox_target:addModel(Config.Devices["smoke"].model, {
 })
 
 ---------------------------------------------------------
--- Sound & Benachrichtigung
+-- Initialisierung & Cleanup
 ---------------------------------------------------------
+
+RegisterNetEvent('d4rk_firealert:client:loadInitialDevices', function(devices)
+    for _, obj in ipairs(spawnedObjects) do if DoesEntityExist(obj) then DeleteEntity(obj) end end
+    spawnedObjects = {}
+    for _, data in ipairs(devices) do CreateBMAProp(data) end
+end)
 
 RegisterNetEvent('d4rk_firealert:client:playAlarmSound', function(coords)
     local playerCoords = GetEntityCoords(cache.ped)
@@ -166,21 +221,13 @@ RegisterNetEvent('d4rk_firealert:client:playAlarmSound', function(coords)
 end)
 
 AddEventHandler('onResourceStop', function(resourceName)
-    if (GetCurrentResourceName() ~= resourceName) then
-        return
-    end
+    if (GetCurrentResourceName() ~= resourceName) then return end
 
-    -- Alle gespawnten Props löschen
     for _, obj in ipairs(spawnedObjects) do
-        if DoesEntityExist(obj) then
-            DeleteEntity(obj)
-        end
+        if DoesEntityExist(obj) then DeleteEntity(obj) end
     end
     
-    -- Falls der Placement-Mode aktiv war, das Ghost-Objekt löschen
-    if ghost and DoesEntityExist(ghost) then
-        DeleteEntity(ghost)
-    end
+    if ghost and DoesEntityExist(ghost) then DeleteEntity(ghost) end
 
     lib.hideTextUI()
     print("^1[d4rk_firealert] Client-seitige Props beim Restart bereinigt.^7")

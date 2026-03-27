@@ -9,6 +9,7 @@ MySQL.ready(function()
                 system.coords = json.decode(system.coords)
             end
             ActiveSystems[system.id] = system
+            ActiveSystems[system.id].status = 'normal' -- Standardstatus
         end
         print(("^2[d4rk_firealert] %s Brandschutzsysteme geladen.^7"):format(#results))
     end
@@ -22,38 +23,41 @@ local function SyncDevices(target)
     end
 end
 
--- Sync beim Joinen (QBX / QBCore / Standalone)
+-- Sync beim Joinen
 RegisterNetEvent('QBCore:Server:PlayerLoaded', function(Player)
     SyncDevices(Player.PlayerData.source)
 end)
 
--- Falls du QBX nutzt:
 AddEventHandler('qbx_core:clientLoaded', function()
     SyncDevices(source)
 end)
 
--- Device registrieren
-RegisterNetEvent('d4rk_firealert:server:registerDevice', function(type, coords, rot, zone, systemName)
+-- Device registrieren (Update mit manualId für Wartungsmodus)
+RegisterNetEvent('d4rk_firealert:server:registerDevice', function(type, coords, rot, zone, systemName, manualId)
     local src = source
-    local systemId = nil
+    local systemId = manualId -- Die ID, die der Techniker am Panel ausgewählt hat
 
+    -- Wenn ein Panel gesetzt wird, neues System in fire_systems erstellen
     if type == "panel" then
         systemId = MySQL.insert.await('INSERT INTO fire_systems (name, coords) VALUES (?, ?)', {
             systemName, json.encode(coords)
         })
         ActiveSystems[systemId] = { id = systemId, name = systemName, coords = coords, status = 'normal' }
-
-        MySQL.insert.await('INSERT INTO fire_devices (system_id, type, coords, rotation, zone) VALUES (?, ?, ?, ?, ?)', {
-            systemId, type, json.encode(coords), json.encode(rot), zone
-        })
-    else
-        systemId = MySQL.scalar.await('SELECT id FROM fire_systems ORDER BY id DESC LIMIT 1')
-        if systemId then
-            MySQL.insert.await('INSERT INTO fire_devices (system_id, type, coords, rotation, zone) VALUES (?, ?, ?, ?, ?)', {
-                systemId, type, json.encode(coords), json.encode(rot), zone
-            })
-        end
     end
+
+    -- Sicherheitscheck: Wenn kein Panel im Wartungsmodus ist und kein neues Panel gebaut wird
+    if not systemId then
+        return TriggerClientEvent('ox_lib:notify', src, {
+            title = 'BMA Fehler', 
+            description = 'Kein aktives System ausgewählt! Starte erst die Wartung am Panel.', 
+            type = 'error'
+        })
+    end
+
+    -- Gerät speichern und fest mit der systemId verknüpfen
+    MySQL.insert.await('INSERT INTO fire_devices (system_id, type, coords, rotation, zone) VALUES (?, ?, ?, ?, ?)', {
+        systemId, type, json.encode(coords), json.encode(rot), zone
+    })
 
     SyncDevices(-1) -- Sofortiger Sync an alle
 end)
@@ -65,6 +69,9 @@ RegisterNetEvent('d4rk_firealert:server:triggerAlarm', function(systemId, zone)
     
     ActiveSystems[id].status = 'alarm'
 
+    -- Visuelles Update an alle (Panel blinken lassen)
+    TriggerClientEvent('d4rk_firealert:client:updateSystemStatus', -1, id, 'alarm')
+
     TriggerClientEvent('ox_lib:notify', -1, {
         title = 'BMA ALARM: ' .. ActiveSystems[id].name,
         description = 'Auslöser: ' .. zone,
@@ -75,6 +82,24 @@ RegisterNetEvent('d4rk_firealert:server:triggerAlarm', function(systemId, zone)
     TriggerClientEvent('d4rk_firealert:client:playAlarmSound', -1, ActiveSystems[id].coords)
 end)
 
+-- Alarm quittieren (Reset)
+RegisterNetEvent('d4rk_firealert:server:quittieren', function(systemId)
+    local src = source
+    local id = tonumber(systemId)
+    
+    if ActiveSystems[id] then
+        ActiveSystems[id].status = 'normal'
+        -- Visuelles Update an alle (Blinken stoppen)
+        TriggerClientEvent('d4rk_firealert:client:updateSystemStatus', -1, id, 'normal')
+        
+        TriggerClientEvent('ox_lib:notify', src, {
+            title = 'BMA', 
+            description = 'System wurde erfolgreich quittiert.', 
+            type = 'success'
+        })
+    end
+end)
+
 -- Gerät entfernen
 RegisterNetEvent('d4rk_firealert:server:removeDevice', function(coords)
     local src = source
@@ -83,7 +108,6 @@ RegisterNetEvent('d4rk_firealert:server:removeDevice', function(coords)
     local x = math.floor(coords.x)
     local y = math.floor(coords.y)
     
-    -- Wir löschen basierend auf den ungefähren Koordinaten im JSON String
     local affectedRows = MySQL.update.await('DELETE FROM fire_devices WHERE coords LIKE ? AND coords LIKE ?', { 
         '%' .. x .. '%', 
         '%' .. y .. '%' 
@@ -95,7 +119,7 @@ RegisterNetEvent('d4rk_firealert:server:removeDevice', function(coords)
             description = 'Gerät wurde erfolgreich entfernt.', 
             type = 'success'
         })
-        SyncDevices(-1) -- Liste für alle aktualisieren
+        SyncDevices(-1)
     else
         print("^1[d4rk_firealert] Fehler: Gerät beim Löschen nicht gefunden.^7")
     end
