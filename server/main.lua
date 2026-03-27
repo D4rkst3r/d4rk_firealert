@@ -103,7 +103,10 @@ end)
 -- Gerät entfernen
 RegisterNetEvent('d4rk_firealert:server:removeDevice', function(coords)
     local src = source
-    if not Utils.HasJob(Config.Job) then return end
+    -- HIER: src hinzugefügt!
+    if not Utils.HasJob(src, Config.Job) then 
+        return print(("^1[d4rk_firealert] Spieler %s hat keine Berechtigung zum Löschen!^7"):format(src))
+    end
 
     -- Wir nutzen einen "Range"-Check statt math.floor, um ungenaue Floats abzufangen
     -- Wir suchen nach Einträgen, die in der Nähe der Klicks sind
@@ -159,7 +162,7 @@ end)
 -- Test Command
 RegisterCommand('test_bma', function(source, args)
     local src = source
-    if not Utils.HasJob(Config.Job) then return end
+    if not Utils.HasJob(src, Config.Job) then return end
 
     local systemId = tonumber(args[1])
     if not systemId or not ActiveSystems[systemId] then 
