@@ -5,22 +5,31 @@ MySQL.ready(function()
     local results = MySQL.query.await('SELECT * FROM fire_systems')
     if results then
         for _, system in ipairs(results) do
-            system.coords = json.decode(system.coords)
+            if type(system.coords) == "string" then
+                system.coords = json.decode(system.coords)
+            end
             ActiveSystems[system.id] = system
         end
+        print(("^2[d4rk_firealert] %s Brandschutzsysteme geladen.^7"):format(#results))
     end
-    print("^2[d4rk_firealert] System erfolgreich geladen.^7")
 end)
 
 -- Hilfsfunktion: Schickt einem Spieler (oder allen) alle aktuellen Geräte
 local function SyncDevices(target)
     local devices = MySQL.query.await('SELECT * FROM fire_devices')
-    TriggerClientEvent('d4rk_firealert:client:loadInitialDevices', target, devices)
+    if devices then
+        TriggerClientEvent('d4rk_firealert:client:loadInitialDevices', target, devices)
+    end
 end
 
--- Sync beim Joinen (QBX / QBCore)
+-- Sync beim Joinen (QBX / QBCore / Standalone)
 RegisterNetEvent('QBCore:Server:PlayerLoaded', function(Player)
     SyncDevices(Player.PlayerData.source)
+end)
+
+-- Falls du QBX nutzt:
+AddEventHandler('qbx_core:clientLoaded', function()
+    SyncDevices(source)
 end)
 
 -- Device registrieren
@@ -46,23 +55,50 @@ RegisterNetEvent('d4rk_firealert:server:registerDevice', function(type, coords, 
         end
     end
 
-    -- WICHTIG: Sofortiger Sync an alle, damit das Prop erscheint
-    SyncDevices(-1)
+    SyncDevices(-1) -- Sofortiger Sync an alle
 end)
 
 -- Alarm auslösen
 RegisterNetEvent('d4rk_firealert:server:triggerAlarm', function(systemId, zone)
-    if not ActiveSystems[systemId] then return end
-    ActiveSystems[systemId].status = 'alarm'
+    local id = tonumber(systemId)
+    if not ActiveSystems[id] then return end
+    
+    ActiveSystems[id].status = 'alarm'
 
     TriggerClientEvent('ox_lib:notify', -1, {
-        title = 'BMA ALARM: ' .. ActiveSystems[systemId].name,
+        title = 'BMA ALARM: ' .. ActiveSystems[id].name,
         description = 'Auslöser: ' .. zone,
         type = 'error',
         duration = 10000
     })
 
-    TriggerClientEvent('d4rk_firealert:client:playAlarmSound', -1, ActiveSystems[systemId].coords)
+    TriggerClientEvent('d4rk_firealert:client:playAlarmSound', -1, ActiveSystems[id].coords)
+end)
+
+-- Gerät entfernen
+RegisterNetEvent('d4rk_firealert:server:removeDevice', function(coords)
+    local src = source
+    if not Utils.HasJob(Config.Job) then return end
+
+    local x = math.floor(coords.x)
+    local y = math.floor(coords.y)
+    
+    -- Wir löschen basierend auf den ungefähren Koordinaten im JSON String
+    local affectedRows = MySQL.update.await('DELETE FROM fire_devices WHERE coords LIKE ? AND coords LIKE ?', { 
+        '%' .. x .. '%', 
+        '%' .. y .. '%' 
+    })
+
+    if affectedRows and affectedRows > 0 then
+        TriggerClientEvent('ox_lib:notify', src, {
+            title = 'BMA Demontage', 
+            description = 'Gerät wurde erfolgreich entfernt.', 
+            type = 'success'
+        })
+        SyncDevices(-1) -- Liste für alle aktualisieren
+    else
+        print("^1[d4rk_firealert] Fehler: Gerät beim Löschen nicht gefunden.^7")
+    end
 end)
 
 -- Wartungs-Loop
@@ -71,4 +107,25 @@ CreateThread(function()
         Wait(Config.Maintenance.CheckInterval * 60000)
         MySQL.update('UPDATE fire_devices SET health = health - 5 WHERE health > 0 ORDER BY RAND() LIMIT 2')
     end
+end)
+
+-- Test Command
+RegisterCommand('test_bma', function(source, args)
+    local src = source
+    if not Utils.HasJob(Config.Job) then return end
+
+    local systemId = tonumber(args[1])
+    if not systemId or not ActiveSystems[systemId] then 
+        TriggerClientEvent('ox_lib:notify', src, {title = 'Fehler', description = 'Ungültige System-ID', type = 'error'})
+        return 
+    end
+
+    TriggerClientEvent('ox_lib:notify', -1, {
+        title = 'BMA PROBEALARM: ' .. ActiveSystems[systemId].name,
+        description = 'Dies ist eine geplante Wartung / Test.',
+        type = 'inform',
+        duration = 5000
+    })
+
+    TriggerClientEvent('d4rk_firealert:client:playAlarmSound', -1, ActiveSystems[systemId].coords)
 end)
