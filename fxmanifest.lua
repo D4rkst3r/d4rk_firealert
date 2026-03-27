@@ -1,26 +1,25 @@
 fx_version 'cerulean'
 game 'gta5'
+lua54 'yes' -- Nutze Lua 5.4 für bessere Performance
 
-author 'D4RK Development'
-description 'Realistisches Brandmeldesystem (BMA)'
+author 'D4rkst3r'
 version '1.0.0'
 
 shared_scripts {
     '@ox_lib/init.lua',
     'config.lua',
-    'shared/utils.lua' -- Wichtig: Vor Client/Server laden!
+    'shared/utils.lua'
 }
 
--- Unter server_scripts:
 server_scripts {
     '@oxmysql/lib/utils.lua',
-    'server/database.lua', -- Zuerst die DB-Funktionen definieren
+    'server/database.lua', -- Zuerst laden!
     'server/main.lua'
 }
 
 client_scripts {
-    'client/main.lua',
-    'client/placement.lua'
+    'client/placement.lua',
+    'client/main.lua'
 }
 
 dependencies {
