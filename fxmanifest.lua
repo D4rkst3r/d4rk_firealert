@@ -12,7 +12,7 @@ shared_scripts {
 }
 
 server_scripts {
-    '@oxmysql/lib/utils.lua',
+    '@oxmysql/lib/MySQL.lua',
     'server/database.lua', -- Zuerst laden!
     'server/main.lua'
 }
