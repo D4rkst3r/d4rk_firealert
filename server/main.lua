@@ -105,23 +105,46 @@ RegisterNetEvent('d4rk_firealert:server:removeDevice', function(coords)
     local src = source
     if not Utils.HasJob(Config.Job) then return end
 
-    local x = math.floor(coords.x)
-    local y = math.floor(coords.y)
-    
-    local affectedRows = MySQL.update.await('DELETE FROM fire_devices WHERE coords LIKE ? AND coords LIKE ?', { 
-        '%' .. x .. '%', 
-        '%' .. y .. '%' 
-    })
+    -- Wir nutzen einen "Range"-Check statt math.floor, um ungenaue Floats abzufangen
+    -- Wir suchen nach Einträgen, die in der Nähe der Klicks sind
+    local xMin, xMax = coords.x - 0.5, coords.x + 0.5
+    local yMin, yMax = coords.y - 0.5, coords.y + 0.5
 
-    if affectedRows and affectedRows > 0 then
-        TriggerClientEvent('ox_lib:notify', src, {
-            title = 'BMA Demontage', 
-            description = 'Gerät wurde erfolgreich entfernt.', 
-            type = 'success'
-        })
-        SyncDevices(-1)
+    -- Wir holen erst alle Geräte und filtern in Lua (sicherer als LIKE bei JSON)
+    local devices = MySQL.query.await('SELECT id, coords FROM fire_devices')
+    local idToDelete = nil
+
+    if devices then
+        for _, dev in ipairs(devices) do
+            local devCoords = type(dev.coords) == "string" and json.decode(dev.coords) or dev.coords
+            if devCoords then
+                -- Check ob die Koordinate nah genug dran ist (Distanz-Check)
+                local dist = #(vector3(coords.x, coords.y, coords.z) - vector3(devCoords.x, devCoords.y, devCoords.z))
+                if dist < 1.5 then
+                    idToDelete = dev.id
+                    break
+                end
+            end
+        end
+    end
+
+    if idToDelete then
+        local affectedRows = MySQL.update.await('DELETE FROM fire_devices WHERE id = ?', { idToDelete })
+        if affectedRows > 0 then
+            TriggerClientEvent('ox_lib:notify', src, {
+                title = 'BMA Demontage', 
+                description = 'Gerät erfolgreich entfernt.', 
+                type = 'success'
+            })
+            SyncDevices(-1)
+        end
     else
-        print("^1[d4rk_firealert] Fehler: Gerät beim Löschen nicht gefunden.^7")
+        print(("^1[d4rk_firealert] Lösch-Fehler: Kein Gerät bei Coords %s gefunden.^7"):format(coords))
+        TriggerClientEvent('ox_lib:notify', src, {
+            title = 'Fehler', 
+            description = 'Gerät konnte in der Datenbank nicht identifiziert werden.', 
+            type = 'error'
+        })
     end
 end)
 

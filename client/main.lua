@@ -92,6 +92,60 @@ CreateThread(function()
     end
 end)
 
+local function OpenDeviceList(sId)
+    local deviceElements = {}
+    local count = 0
+
+    -- Wir gehen durch alle gespawnten Objekte und suchen die passenden
+    for _, obj in ipairs(spawnedObjects) do
+        if DoesEntityExist(obj) then
+            local state = Entity(obj).state
+            if state.systemId == sId then
+                count = count + 1
+                local coords = GetEntityCoords(obj)
+                local zone = state.zoneName or "Unbekannte Zone"
+                local model = GetEntityModel(obj)
+                
+                -- Typ-Bestimmung für das Icon
+                local deviceIcon = 'microchip'
+                if model == GetHashKey(Config.Devices["smoke"].model) then deviceIcon = 'wind'
+                elseif model == GetHashKey(Config.Devices["pull"].model) then deviceIcon = 'hand-point-up'
+                elseif model == GetHashKey(Config.Devices["panel"].model) then deviceIcon = 'terminal'
+                end
+
+                table.insert(deviceElements, {
+                    title = zone,
+                    description = string.format("Typ: %s | Distanz: %.1fm", deviceIcon, #(coords - GetEntityCoords(cache.ped))),
+                    icon = deviceIcon,
+                    metadata = {
+                        {label = 'ID', value = count},
+                        {label = 'Coords', value = string.format("%.1f, %.1f", coords.x, coords.y)}
+                    },
+                    onSelect = function()
+                        -- Kleiner Bonus: Markiert das Gerät kurz für den Techniker
+                        SetEntityDrawOutline(obj, true)
+                        SetEntityDrawOutlineColor(0, 255, 0, 255)
+                        lib.notify({description = 'Gerät in '..zone..' wurde markiert.', type = 'inform'})
+                        Wait(3000)
+                        SetEntityDrawOutline(obj, false)
+                    end
+                })
+            end
+        end
+    end
+
+    if #deviceElements == 0 then
+        table.insert(deviceElements, { title = 'Keine Geräte gefunden', disabled = true })
+    end
+
+    lib.registerContext({
+        id = 'bma_device_list',
+        title = 'Verbundene Geräte (Gesamt: '..count..')',
+        menu = 'bma_main_menu', -- Erlaubt "Zurück"-Button
+        options = deviceElements
+    })
+    lib.showContext('bma_device_list')
+end
 -- Das Hauptmenü am Panel
 local function OpenBMAMenu(entity)
     local sId = Entity(entity).state.systemId
@@ -101,6 +155,14 @@ local function OpenBMAMenu(entity)
         id = 'bma_main_menu',
         title = 'BMA Zentrale - ID: ' .. sId,
         options = {
+            {
+                title = 'Verbundene Geräte',
+                description = 'Zeigt alle Melder an, die mit diesem System gekoppelt sind.',
+                icon = 'list-check',
+                onSelect = function()
+                    OpenDeviceList(sId)
+                end
+            },
             {
                 title = 'Wartungsmodus',
                 description = (currentSystemId == sId) and '✅ AKTIV - Du kannst Melder koppeln' or '❌ INAKTIV - Klicke zum Starten',
