@@ -82,7 +82,7 @@ CreateThread(function()
 
                 for _, obj in ipairs(spawnedObjects) do
                     if DoesEntityExist(obj) and Entity(obj).state.systemId == sId then
-                        if GetEntityModel(obj) == GetHashKey(Config.Devices["panel"].model) then
+                        if GetEntityModel(obj) == Config.Devices["panel"].model then
                             SetEntityDrawOutline(obj, true)
                             SetEntityDrawOutlineColor(255, 0, 0, 255)
                             local c = GetEntityCoords(obj)
@@ -299,4 +299,11 @@ AddEventHandler('onResourceStop', function(resourceName)
 
     lib.hideTextUI()
     print("^1[d4rk_firealert] Client-seitige Props beim Restart bereinigt.^7")
+end)
+
+AddEventHandler('onResourceStart', function(resourceName)
+    if GetCurrentResourceName() ~= resourceName then return end
+    -- Kurz warten bis Server-Seite initialisiert ist
+    Wait(1000)
+    TriggerServerEvent('d4rk_firealert:server:requestSync')
 end)

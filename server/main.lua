@@ -22,6 +22,9 @@ local function SyncDevices(target)
         TriggerClientEvent('d4rk_firealert:client:loadInitialDevices', target, devices)
     end
 end
+RegisterNetEvent('d4rk_firealert:server:requestSync', function()
+    SyncDevices(source)
+end)
 
 -- Sync beim Joinen
 RegisterNetEvent('QBCore:Server:PlayerLoaded', function(Player)
