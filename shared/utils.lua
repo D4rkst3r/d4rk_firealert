@@ -1,4 +1,4 @@
--- d4rk_firealert:shared/utils.lua
+-- d4rk_firealert: shared/utils.lua
 Utils = {}
 
 -- Formatiert Vektoren für die Datenbank
@@ -18,29 +18,22 @@ function Utils.Log(msg)
     end
 end
 
-function Utils.HasJob(serverId, allowedJobs) -- serverId hinzugefügt
+-- FIX #1: Getrennte Funktionen für Client und Server, um Argument-Verwechslung zu vermeiden.
+
+-- SERVERSEITIG: Erwartet eine Spieler-ID (source) und den Job-Namen
+function Utils.HasJobServer(serverId, allowedJobs)
     if not allowedJobs or allowedJobs == "" then return true end
+    if not serverId then return false end
 
     local jobName = nil
-    
-    if IsDuplicityVersion() then -- SERVERSEITIG
-        if not serverId then return false end -- Ohne ID kein Check möglich
-        
-        if GetResourceState('qbx_core') == 'started' then
-            local Player = exports.qbx_core:GetPlayer(serverId) -- Nutze serverId statt source
-            if Player then jobName = Player.PlayerData.job.name end
-        elseif GetResourceState('qb-core') == 'started' then
-            local QBCore = exports['qb-core']:GetCoreObject()
-            local Player = QBCore.Functions.GetPlayer(serverId)
-            if Player then jobName = Player.PlayerData.job.name end
-        end
-    else -- CLIENTSEITIG
-        if GetResourceState('qbx_core') == 'started' then
-            jobName = exports.qbx_core:GetPlayerData().job.name
-        elseif GetResourceState('qb-core') == 'started' then
-            local QBCore = exports['qb-core']:GetCoreObject()
-            jobName = QBCore.Functions.GetPlayerData().job.name
-        end
+
+    if GetResourceState('qbx_core') == 'started' then
+        local Player = exports.qbx_core:GetPlayer(serverId)
+        if Player then jobName = Player.PlayerData.job.name end
+    elseif GetResourceState('qb-core') == 'started' then
+        local QBCore = exports['qb-core']:GetCoreObject()
+        local Player = QBCore.Functions.GetPlayer(serverId)
+        if Player then jobName = Player.PlayerData.job.name end
     end
 
     if not jobName then return false end
@@ -49,9 +42,44 @@ function Utils.HasJob(serverId, allowedJobs) -- serverId hinzugefügt
         for _, name in ipairs(allowedJobs) do
             if jobName == name then return true end
         end
-    else
-        return jobName == allowedJobs
+        return false
     end
 
-    return false
+    return jobName == allowedJobs
+end
+
+-- CLIENTSEITIG: Kein serverId benötigt, liest den eigenen Job aus
+function Utils.HasJobClient(allowedJobs)
+    if not allowedJobs or allowedJobs == "" then return true end
+
+    local jobName = nil
+
+    if GetResourceState('qbx_core') == 'started' then
+        jobName = exports.qbx_core:GetPlayerData().job.name
+    elseif GetResourceState('qb-core') == 'started' then
+        local QBCore = exports['qb-core']:GetCoreObject()
+        jobName = QBCore.Functions.GetPlayerData().job.name
+    end
+
+    if not jobName then return false end
+
+    if type(allowedJobs) == "table" then
+        for _, name in ipairs(allowedJobs) do
+            if jobName == name then return true end
+        end
+        return false
+    end
+
+    return jobName == allowedJobs
+end
+
+-- Rückwärtskompatibel: Die alte HasJob-Funktion leitet je nach Kontext weiter
+function Utils.HasJob(serverIdOrJob, allowedJobs)
+    if IsDuplicityVersion() then
+        -- Serverseitig: erstes Argument ist immer die serverId
+        return Utils.HasJobServer(serverIdOrJob, allowedJobs)
+    else
+        -- Clientseitig: erstes Argument ist der Job (kein serverId nötig)
+        return Utils.HasJobClient(serverIdOrJob)
+    end
 end
