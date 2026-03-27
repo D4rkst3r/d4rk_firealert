@@ -1,33 +1,34 @@
 Config = {}
-Config.Framework = "qbx"    -- "qbx" oder "qbcore"
+Config.Framework = "qbx"
 Config.Job       = "firefighter"
 
-Config.Debug = true
+Config.Debug   = true
+Config.Version = "2.1.0"
 
 Config.Maintenance = {
-    DegradeChance = 5,              -- % Chance pro Check dass ein Gerät degradiert
-    CheckInterval = 30,             -- Alle X Minuten
+    DegradeChance = 5,
+    CheckInterval = 30,
     RepairItem    = "electronics_kit"
 }
 
--- FIX #7: Version angepasst
-Config.Version = "2.0.0"
-
--- Automatische Rauchmelder-Auslösung (#1)
 Config.AutoSmoke = {
-    Enabled      = true,   -- Rauchmelder reagieren auf GTA-Feuer in der Nähe
-    CheckRadius  = 8.0,    -- Radius in Metern um den Rauchmelder
-    CheckInterval = 5,     -- Sekunden zwischen Checks (pro Melder)
+    Enabled       = true,
+    CheckRadius   = 8.0,
+    CheckInterval = 5,
 }
 
--- Dispatch-Integration (#3)
 Config.Dispatch = {
     Enabled = true,
-    -- Unterstützte Systeme: "ps-dispatch", "cd_dispatch", "ox_lib" (nur Notify), "none"
-    System  = "ps-dispatch",
-    Code    = "10-70",     -- Einsatz-Code der in der Dispatch-Meldung erscheint
+    System  = "ps-dispatch",  -- "ps-dispatch" | "cd_dispatch" | "ox_lib" | "none"
+    Code    = "10-70",
     Icon    = "fas fa-fire-extinguisher",
-    Color   = "#e74c3c",   -- Farbe des Dispatch-Markers
+    Color   = "#e74c3c",
+}
+
+-- FIX #5: Maximale Platzierungsdistanz vom Spieler
+Config.Placement = {
+    MaxDistance = 4.0,  -- Meter (verhindert Fernplatzierung via Mausrad-Spam)
+    MinDistance = 0.5,
 }
 
 Config.Devices = {

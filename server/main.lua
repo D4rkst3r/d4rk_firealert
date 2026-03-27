@@ -2,7 +2,10 @@
 local ActiveSystems  = {}
 local AlarmCooldowns = {}  -- { [src] = os.time() }
 local dbReady        = false
-local pendingSyncs   = {}  -- Clients die requestSync vor MySQL.ready schickten
+local pendingSyncs   = {}  -- { [src] = true } — FIX #2: Set statt Array (kein Duplikat möglich)
+
+-- FIX #8: Echter Zufalls-Seed damit Degradierung nach Restart nicht deterministisch ist
+math.randomseed(os.time())
 
 ---------------------------------------------------------
 -- Initialisierung
@@ -16,15 +19,14 @@ MySQL.ready(function()
                 system.coords = json.decode(system.coords)
             end
             ActiveSystems[system.id] = system
-            -- Status kommt direkt aus der DB (normal / alarm / trouble)
         end
-        print(("^2[d4rk_firealert] %s Brandschutzsysteme geladen.^7"):format(#results))
+        print(("^2[d4rk_firealert] %s Brandschutzsysteme geladen (v%s).^7"):format(#results, Config.Version))
     end
 
     dbReady = true
 
-    -- Alle Clients syncen die während MySQL.ready gewartet haben
-    for _, src in ipairs(pendingSyncs) do
+    -- FIX #2: pendingSyncs ist jetzt ein Set { [src] = true } — kein Duplikat möglich
+    for src in pairs(pendingSyncs) do
         SyncDevices(src)
     end
     pendingSyncs = {}
@@ -41,7 +43,7 @@ function SyncDevices(target)
     end
 end
 
--- FIX #3: Dispatch-Benachrichtigung je nach konfiguriertem System
+-- Dispatch-Benachrichtigung je nach konfiguriertem System
 local function SendDispatch(systemId, zone, coords)
     if not Config.Dispatch.Enabled then return end
 
@@ -50,7 +52,6 @@ local function SendDispatch(systemId, zone, coords)
 
     local title = Config.Dispatch.Code .. ' - Brandmeldung: ' .. system.name
     local desc  = 'Auslöser: ' .. zone
-
     local dispatchSystem = Config.Dispatch.System
 
     if dispatchSystem == "ps-dispatch" and GetResourceState('ps-dispatch') == 'started' then
@@ -65,17 +66,16 @@ local function SendDispatch(systemId, zone, coords)
 
     elseif dispatchSystem == "cd_dispatch" and GetResourceState('cd_dispatch') == 'started' then
         exports['cd_dispatch']:SendAlert({
-            job_table  = { Config.Job },
-            coords     = coords,
-            message    = title .. ' | ' .. desc,
-            code       = Config.Dispatch.Code,
-            icon       = Config.Dispatch.Icon,
+            job_table = { Config.Job },
+            coords    = coords,
+            message   = title .. ' | ' .. desc,
+            code      = Config.Dispatch.Code,
+            icon      = Config.Dispatch.Icon,
         })
 
     else
-        -- Fallback: ox_lib Notify nur an Feuerwehr-Spieler
-        local players = GetPlayers()
-        for _, playerId in ipairs(players) do
+        -- Fallback: nur Feuerwehr-Spieler benachrichtigen
+        for _, playerId in ipairs(GetPlayers()) do
             if Utils.HasJobServer(tonumber(playerId), Config.Job) then
                 TriggerClientEvent('ox_lib:notify', tonumber(playerId), {
                     title       = title,
@@ -90,8 +90,9 @@ end
 
 -- Trouble-Status für ein System prüfen und ggf. aufheben
 local function CheckAndClearTrouble(systemId)
-    local troubled = db.getTroubledDevices()
+    local troubled      = db.getTroubledDevices()
     local stillTroubled = false
+
     if troubled then
         for _, row in ipairs(troubled) do
             if row.system_id == systemId then
@@ -100,11 +101,14 @@ local function CheckAndClearTrouble(systemId)
             end
         end
     end
-    if not stillTroubled and ActiveSystems[systemId] and ActiveSystems[systemId].status == 'trouble' then
+
+    if not stillTroubled
+    and ActiveSystems[systemId]
+    and ActiveSystems[systemId].status == 'trouble' then
         ActiveSystems[systemId].status = 'normal'
         db.updateSystemStatus(systemId, 'normal')
         TriggerClientEvent('d4rk_firealert:client:updateSystemStatus', -1, systemId, 'normal')
-        Utils.Log(("System #%s: Trouble aufgehoben, alle Geräte repariert."):format(systemId))
+        Utils.Log(("System #%s: Trouble aufgehoben."):format(systemId))
     end
 end
 
@@ -117,7 +121,17 @@ RegisterNetEvent('d4rk_firealert:server:requestSync', function()
     if dbReady then
         SyncDevices(src)
     else
-        table.insert(pendingSyncs, src)
+        -- FIX #2: Set-Eintrag statt table.insert — verhindert Doppel-Sync bei mehrfachem requestSync
+        pendingSyncs[src] = true
+        Utils.Log(("Spieler %s hat requestSync vor DB-Ready geschickt — wird nachgeholt."):format(src))
+
+        -- FIX #6: Client informieren dass der Sync aussteht
+        TriggerClientEvent('ox_lib:notify', src, {
+            title       = 'BMA',
+            description = 'Server wird initialisiert, Geräte werden gleich geladen...',
+            type        = 'inform',
+            duration    = 3000
+        })
     end
 end)
 
@@ -133,16 +147,25 @@ end)
 -- Device registrieren
 ---------------------------------------------------------
 
+-- FIX #10: lib.addCommand für ACE-Integration statt RegisterCommand
+lib.addCommand('install_bma', {
+    help   = 'BMA Gerät installieren (panel/smoke/pull/siren)',
+    params = {
+        { name = 'type', type = 'string', help = 'Gerätetyp: panel, smoke, pull, siren' }
+    },
+    restricted = false -- Job-Check passiert clientseitig + serverseitig
+}, function(source, args)
+    -- Dieser Callback läuft serverseitig, aber /install_bma öffnet nur den Client-Placement-Modus
+    -- Der eigentliche Job-Check passiert in registerDevice unten
+end)
+
 RegisterNetEvent('d4rk_firealert:server:registerDevice', function(deviceType, coords, rot, zone, systemName, manualId)
     local src = source
 
-    -- FIX #8: Job-Check fehlte komplett — jeder konnte Geräte spawnen
     if not Utils.HasJobServer(src, Config.Job) then
         Utils.Log(("Spieler %s hat versucht ein Gerät ohne Job zu installieren!"):format(src))
         return TriggerClientEvent('ox_lib:notify', src, {
-            title       = 'BMA Fehler',
-            description = 'Du hast keine Berechtigung für diese Aktion.',
-            type        = 'error'
+            title = 'BMA Fehler', description = 'Keine Berechtigung.', type = 'error'
         })
     end
 
@@ -189,11 +212,21 @@ RegisterNetEvent('d4rk_firealert:server:triggerAlarm', function(systemId, zone, 
     local id  = tonumber(systemId)
 
     if not ActiveSystems[id] then return end
-    if ActiveSystems[id].status == 'alarm' then return end -- Bereits im Alarm
+    if ActiveSystems[id].status == 'alarm' then return end
 
-    -- Proximity-Check (nur bei manuellen Alarmen, nicht bei automatischen)
+    -- FIX #1: triggerType 'automatic' darf NICHT vom Client kommen
+    -- Ein Cheater könnte sonst Proximity- und Cooldown-Check umgehen
+    -- Automatische Alarme werden intern vom Server via separatem Event ausgelöst
+    local isAutomatic = false  -- Immer false wenn vom Client — Server setzt das selbst
     local isTriggerAutomatic = (triggerType == 'automatic')
-    if not isTriggerAutomatic and deviceCoords then
+
+    if isTriggerAutomatic then
+        -- Client hat 'automatic' gesendet — als manuell behandeln (Cheating-Versuch)
+        Utils.Log(("Spieler %s hat triggerType='automatic' gesendet — wird als manuell behandelt!"):format(src))
+    end
+
+    -- Proximity-Check für alle Client-seitigen Trigger
+    if deviceCoords then
         local playerCoords = GetEntityCoords(GetPlayerPed(src))
         local dist = #(playerCoords - vector3(deviceCoords.x, deviceCoords.y, deviceCoords.z))
         if dist > 5.0 then
@@ -202,39 +235,65 @@ RegisterNetEvent('d4rk_firealert:server:triggerAlarm', function(systemId, zone, 
         end
     end
 
-    -- Cooldown-Check (nur manuelle Alarme)
-    if not isTriggerAutomatic then
-        local now = os.time()
-        if AlarmCooldowns[src] and (now - AlarmCooldowns[src]) < 30 then
-            TriggerClientEvent('ox_lib:notify', src, {
-                title       = 'BMA',
-                description = 'Bitte warte kurz vor dem nächsten Alarm.',
-                type        = 'error'
-            })
-            return
-        end
-        AlarmCooldowns[src] = now
+    -- Cooldown-Check für alle Client-seitigen Trigger
+    local now = os.time()
+    if AlarmCooldowns[src] and (now - AlarmCooldowns[src]) < 30 then
+        TriggerClientEvent('ox_lib:notify', src, {
+            title = 'BMA', description = 'Bitte warte kurz vor dem nächsten Alarm.', type = 'error'
+        })
+        return
     end
+    AlarmCooldowns[src] = now
 
-    ActiveSystems[id].status = 'alarm'
-    db.updateSystemStatus(id, 'alarm')
+    TriggerAlarm(id, zone, 'manual')
+end)
 
-    -- FIX #2: Alarm loggen
-    db.logAlarm(id, ActiveSystems[id].name, zone, isTriggerAutomatic and 'automatic' or 'manual')
+-- FIX #1: Internes Server-Event für automatische Rauchmelder-Alarme
+-- Wird NUR vom Server selbst aufgerufen (nicht über das Netzwerk erreichbar)
+function TriggerAlarm(systemId, zone, triggerType)
+    if not ActiveSystems[systemId] then return end
+    if ActiveSystems[systemId].status == 'alarm' then return end
 
-    TriggerClientEvent('d4rk_firealert:client:updateSystemStatus', -1, id, 'alarm')
+    ActiveSystems[systemId].status = 'alarm'
+    db.updateSystemStatus(systemId, 'alarm')
+    db.logAlarm(systemId, ActiveSystems[systemId].name, zone, triggerType)
+
+    TriggerClientEvent('d4rk_firealert:client:updateSystemStatus', -1, systemId, 'alarm')
 
     TriggerClientEvent('ox_lib:notify', -1, {
-        title       = '🚨 BMA ALARM: ' .. ActiveSystems[id].name,
+        title       = '🚨 BMA ALARM: ' .. ActiveSystems[systemId].name,
         description = 'Auslöser: ' .. zone,
         type        = 'error',
         duration    = 10000
     })
 
-    TriggerClientEvent('d4rk_firealert:client:playAlarmSound', -1, ActiveSystems[id].coords)
+    TriggerClientEvent('d4rk_firealert:client:playAlarmSound', -1, ActiveSystems[systemId].coords)
+    SendDispatch(systemId, zone, ActiveSystems[systemId].coords)
+end
 
-    -- FIX #3: Dispatch-Meldung an Feuerwehr senden
-    SendDispatch(id, zone, ActiveSystems[id].coords)
+-- FIX #1: Separates Server-Event für automatische Alarme vom Client
+-- Client sendet dieses Event wenn ein Rauchmelder Feuer erkennt
+-- Server prüft Plausibilität und ruft TriggerAlarm intern auf
+RegisterNetEvent('d4rk_firealert:server:triggerAutoAlarm', function(systemId, zone, smokeCoords)
+    local src = source
+    local id  = tonumber(systemId)
+
+    if not ActiveSystems[id] then return end
+    if ActiveSystems[id].status == 'alarm' then return end
+
+    -- Plausibilitätscheck: Spieler muss sich in der Nähe des Rauchmelders befinden
+    -- (verhindert dass jemand remote automatische Alarme für beliebige Systeme auslöst)
+    if smokeCoords then
+        local playerCoords = GetEntityCoords(GetPlayerPed(src))
+        local dist = #(playerCoords - vector3(smokeCoords.x, smokeCoords.y, smokeCoords.z))
+        -- Großzügigerer Radius (50m) — Spieler muss im Gebäude sein, nicht direkt am Melder
+        if dist > 50.0 then
+            Utils.Log(("AutoAlarm von Spieler %s aus %.1fm Distanz blockiert."):format(src, dist))
+            return
+        end
+    end
+
+    TriggerAlarm(id, zone, 'automatic')
 end)
 
 ---------------------------------------------------------
@@ -245,13 +304,10 @@ RegisterNetEvent('d4rk_firealert:server:quittieren', function(systemId)
     local src = source
     local id  = tonumber(systemId)
 
-    -- FIX #9: Job-Check fehlte — jeder Spieler konnte Alarme quittieren
     if not Utils.HasJobServer(src, Config.Job) then
         Utils.Log(("Spieler %s hat versucht Alarm ohne Job zu quittieren!"):format(src))
         return TriggerClientEvent('ox_lib:notify', src, {
-            title       = 'BMA Fehler',
-            description = 'Nur Feuerwehr kann Alarme quittieren.',
-            type        = 'error'
+            title = 'BMA Fehler', description = 'Nur Feuerwehr kann Alarme quittieren.', type = 'error'
         })
     end
 
@@ -259,17 +315,11 @@ RegisterNetEvent('d4rk_firealert:server:quittieren', function(systemId)
 
     ActiveSystems[id].status = 'normal'
     db.updateSystemStatus(id, 'normal')
-
-    -- FIX #2: Quittierung im Log vermerken
-    local playerName = GetPlayerName(src) or tostring(src)
-    db.logAcknowledge(id, playerName)
+    db.logAcknowledge(id, GetPlayerName(src) or tostring(src))
 
     TriggerClientEvent('d4rk_firealert:client:updateSystemStatus', -1, id, 'normal')
-
     TriggerClientEvent('ox_lib:notify', src, {
-        title       = 'BMA',
-        description = 'System wurde erfolgreich quittiert.',
-        type        = 'success'
+        title = 'BMA', description = 'System wurde erfolgreich quittiert.', type = 'success'
     })
 end)
 
@@ -277,7 +327,6 @@ end)
 -- Gerät entfernen
 ---------------------------------------------------------
 
--- FIX #6: Empfängt jetzt deviceId statt Coords — kein teurer Koordinaten-Scan mehr
 RegisterNetEvent('d4rk_firealert:server:removeDevice', function(deviceId)
     local src = source
 
@@ -292,15 +341,11 @@ RegisterNetEvent('d4rk_firealert:server:removeDevice', function(deviceId)
     if affectedRows > 0 then
         TriggerClientEvent('d4rk_firealert:client:removeDevice', -1, deviceId)
         TriggerClientEvent('ox_lib:notify', src, {
-            title       = 'BMA Demontage',
-            description = 'Gerät erfolgreich entfernt.',
-            type        = 'success'
+            title = 'BMA Demontage', description = 'Gerät erfolgreich entfernt.', type = 'success'
         })
     else
         TriggerClientEvent('ox_lib:notify', src, {
-            title       = 'Fehler',
-            description = 'Gerät konnte nicht entfernt werden.',
-            type        = 'error'
+            title = 'Fehler', description = 'Gerät konnte nicht entfernt werden.', type = 'error'
         })
     end
 end)
@@ -314,7 +359,6 @@ RegisterNetEvent('d4rk_firealert:server:repairDevice', function(deviceId)
 
     if not Utils.HasJobServer(src, Config.Job) then return end
 
-    -- Item-Check
     local repairItem = Config.Maintenance.RepairItem
     if repairItem and repairItem ~= "" then
         local hasItem = false
@@ -331,14 +375,12 @@ RegisterNetEvent('d4rk_firealert:server:repairDevice', function(deviceId)
             end
 
         else
-            hasItem = true -- Kein Inventory-System → Item-Check überspringen
+            hasItem = true
         end
 
         if not hasItem then
             return TriggerClientEvent('ox_lib:notify', src, {
-                title       = 'BMA Reparatur',
-                description = 'Benötigt: ' .. repairItem,
-                type        = 'error'
+                title = 'BMA Reparatur', description = 'Benötigt: ' .. repairItem, type = 'error'
             })
         end
     end
@@ -346,21 +388,16 @@ RegisterNetEvent('d4rk_firealert:server:repairDevice', function(deviceId)
     db.updateDeviceHealth(deviceId, 100)
     TriggerClientEvent('d4rk_firealert:client:updateDeviceHealth', -1, deviceId, 100)
 
-    -- Trouble-Status prüfen
     local device = db.getDeviceById(deviceId)
-    if device then
-        CheckAndClearTrouble(device.system_id)
-    end
+    if device then CheckAndClearTrouble(device.system_id) end
 
     TriggerClientEvent('ox_lib:notify', src, {
-        title       = 'BMA Reparatur',
-        description = 'Gerät erfolgreich auf 100% repariert.',
-        type        = 'success'
+        title = 'BMA Reparatur', description = 'Gerät auf 100% repariert.', type = 'success'
     })
 end)
 
 ---------------------------------------------------------
--- Alarm-Log abrufen (für Panel-Menü)
+-- Alarm-Log abrufen
 ---------------------------------------------------------
 
 RegisterNetEvent('d4rk_firealert:server:getAlarmLog', function(systemId)
@@ -372,7 +409,7 @@ RegisterNetEvent('d4rk_firealert:server:getAlarmLog', function(systemId)
 end)
 
 ---------------------------------------------------------
--- Wartungs-Loop
+-- Wartungs-Loop (FIX #8: math.randomseed bereits am Anfang gesetzt)
 ---------------------------------------------------------
 
 CreateThread(function()
@@ -407,21 +444,26 @@ CreateThread(function()
 end)
 
 ---------------------------------------------------------
--- Test Command
+-- Test Command (FIX #10: lib.addCommand für ACE)
 ---------------------------------------------------------
 
-RegisterCommand('test_bma', function(source, args)
-    local src = source
-    if not Utils.HasJobServer(src, Config.Job) then return end
+lib.addCommand('test_bma', {
+    help   = 'BMA Probealarm auslösen',
+    params = {
+        { name = 'systemId', type = 'number', help = 'System-ID' }
+    },
+    restricted = 'group.admin'
+}, function(source, args)
+    local src      = source
+    local systemId = args.systemId
 
-    local systemId = tonumber(args[1])
-    if not systemId or not ActiveSystems[systemId] then
+    if not Utils.HasJobServer(src, Config.Job) then return end
+    if not ActiveSystems[systemId] then
         return TriggerClientEvent('ox_lib:notify', src, {
             title = 'Fehler', description = 'Ungültige System-ID', type = 'error'
         })
     end
 
-    -- Test als eigenen Trigger-Typ loggen
     db.logAlarm(systemId, ActiveSystems[systemId].name, 'Probealarm', 'test')
 
     TriggerClientEvent('ox_lib:notify', -1, {

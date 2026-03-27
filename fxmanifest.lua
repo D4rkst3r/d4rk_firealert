@@ -3,7 +3,7 @@ game 'gta5'
 lua54 'yes'
 
 author  'D4rkst3r'
-version '2.0.0'
+version '2.1.0'
 
 shared_scripts {
     '@ox_lib/init.lua',
@@ -31,4 +31,12 @@ dependencies {
     'ox_lib',
     'ox_target',
     'oxmysql'
+}
+
+-- FIX #10: ACE-Permissions für Commands registrieren
+-- In server.cfg: add_ace group.firefighter command.install_bma allow
+--                add_ace group.admin command.test_bma allow
+ace_permissions {
+    'command.install_bma',
+    'command.test_bma',
 }
