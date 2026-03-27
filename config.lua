@@ -1,8 +1,8 @@
 Config = {}
-Config.Framework = "qbx" -- "qbx" oder "qbcore"
-Config.Job = "fire"      -- Jobname der Feuerwehr
+Config.Framework = "qbx"   -- "qbx" oder "qbcore"
+Config.Job = "firefighter" -- Jobname der Feuerwehr
 
-Config.Debug = true      -- Zeigt Marker und Prints in der Konsole
+Config.Debug = true        -- Zeigt Marker und Prints in der Konsole
 
 Config.Maintenance = {
     DegradeChance = 5,             -- 5% Chance pro Check auf Defekt
@@ -12,13 +12,13 @@ Config.Maintenance = {
 
 Config.Devices = {
     ["panel"] = {
-        label = "BMA Zentrale",
-        model = `prop_ops_industrial_01`,
+        label = "Fire Alarm Panel",
+        model = `m23_1_prop_m31_controlpanel_02a`,
         price = 5000
     },
     ["smoke"] = {
         label = "Rauchmelder",
-        model = `prop_fire_alarm_04`,
+        model = `prop_fire_alarm_03`,
         price = 450
     },
     ["pull"] = {

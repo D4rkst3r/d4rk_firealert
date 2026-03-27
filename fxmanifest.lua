@@ -22,6 +22,11 @@ client_scripts {
     'client/main.lua'
 }
 
+files {
+    'stream/prop_fire_alarm.ytyp',
+}
+data_file 'DLC_ITYP_REQUEST' 'stream/prop_fire_alarm.ytyp'
+
 dependencies {
     'ox_lib',
     'ox_target',
