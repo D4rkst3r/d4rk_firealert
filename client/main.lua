@@ -328,21 +328,22 @@ CreateThread(function()
 end)
 
 -- Sirenen-Audio-Thread
--- Wichtig: GetSoundId() verwenden statt -1, damit StopSound() später funktioniert.
--- Mit -1 als Handle kann der Sound nicht gestoppt werden — das war der Bug.
---
--- Nur nicht-loopende Sounds verwenden! Loopende Sounds (wie Altitude_Warning)
--- laufen sonst endlos weiter auch wenn StopSound aufgerufen wird.
---
--- Getestete nicht-loopende Alarm-Sounds:
---   "Remote_Control_Fuse_Box_Alarm" / "GTAO_FM_Events_Soundset"  (~2s) ← Standard
---   "Breaker_01"                    / "DLC_HALLOWEEN_FVJ_Sounds" (~1.5s)
---   "Breaker_02"                    / "DLC_HALLOWEEN_FVJ_Sounds" (~2s)
+-- Soundbank muss mit RequestScriptAudioBank geladen werden,
+-- sonst liefert PlaySoundFromCoord Stille auch wenn der Sound existiert.
+-- Manueller Distanz-Check vor dem Abspielen da range-Parameter bei
+-- isNetwork=false von GTA ignoriert wird.
 CreateThread(function()
-        local SOUND_NAME  = "Altitude_Warning"
-        local SOUND_SET   = "EXILE_1"
-        local INTERVAL_MS = 2500  -- Sound ist ~2.5s lang
-        local RANGE       = 40.0
+    local SOUND_NAME  = "Altitude_Warning"
+    local SOUND_SET   = "EXILE_1"
+    local INTERVAL_MS = 2500  -- Sound ist ~2.5s lang
+    local RANGE       = 40
+
+    
+    -- Soundbank vorab laden — ohne das kein Sound
+    RequestScriptAudioBank(SOUND_SET, false)
+
+    -- Kurz warten bis Bank geladen ist
+    Wait(500)
 
     while true do
         Wait(500)
@@ -358,7 +359,7 @@ CreateThread(function()
                 local audio = sirenAudio[sId]
 
                 if (now - audio.lastPlayed) >= INTERVAL_MS then
-                    -- Vorherigen Sound-Handle sauber beenden bevor neuer gespielt wird
+                    -- Vorherigen Sound-Handle sauber beenden
                     if audio.soundId ~= -1 then
                         StopSound(audio.soundId)
                         ReleaseSoundId(audio.soundId)
@@ -366,14 +367,27 @@ CreateThread(function()
                     end
 
                     local played = false
+                    local playerCoords = GetEntityCoords(cache.ped)
+
                     for _, siren in ipairs(sirenObjects[sId]) do
                         if DoesEntityExist(siren) then
-                            local c       = GetEntityCoords(siren)
-                            local soundId = GetSoundId()
-                            PlaySoundFromCoord(soundId, SOUND_NAME, c.x, c.y, c.z, SOUND_SET, false, RANGE, false)
-                            audio.soundId    = soundId
-                            audio.lastPlayed = now
-                            played = true
+                            local c    = GetEntityCoords(siren)
+                            local dist = #(playerCoords - c)
+
+                            if dist <= RANGE then
+                                local soundId = GetSoundId()
+                                -- range=0 da isNetwork=false den Parameter ignoriert
+                                -- der manuelle Distanz-Check oben übernimmt die Reichweite
+                                PlaySoundFromCoord(soundId, SOUND_NAME, c.x, c.y, c.z, SOUND_SET, false, 0, false)
+                                audio.soundId    = soundId
+                                audio.lastPlayed = now
+                                played = true
+                            else
+                                -- Außerhalb Reichweite — lastPlayed setzen damit
+                                -- beim nächsten Tick wieder geprüft wird
+                                audio.lastPlayed = now
+                                played = true
+                            end
                             break
                         end
                     end
