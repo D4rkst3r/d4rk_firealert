@@ -9,7 +9,7 @@ Config.Version = "2.4.0"
 Config.Maintenance = {
     DegradeChance = 5,   -- % Chance pro Check dass ein Gerät Health verliert
     CheckInterval = 30,  -- Minuten zwischen automatischen Health-Checks
-    RepairItem    = "repairkit"  -- "" = kein Item nötig
+    RepairItem    = "electronickit"  -- "" = kein Item nötig
 }
 
 -- NEU: Wie viele Tage zwischen Pflichtinspektionen liegen.
@@ -44,11 +44,10 @@ Config.Interaction = {
 
 -- NEU: Sprinkleranlage
 Config.Sprinkler = {
-    -- GTA-Partikel-Dictionary und -Effektname für den Wasserstrahl.
-    -- "ent_ray_fire_sprinkler" aus "core" ist der native GTA-Sprinkler-Effekt.
+    
     ParticleDict   = "core",
-    ParticleEffect = "ent_ray_fire_sprinkler",
-    ParticleScale  = 1.5,    -- Größe des Partikel-Effekts
+    ParticleEffect = "scr_agency3b_sprinkler_on",
+    ParticleScale  = 1.5,
 
     -- Radius in dem Feuer gelöscht wird (RemoveAllFiresInRange)
     ExtinguishRadius   = 4.0,
@@ -59,13 +58,17 @@ Config.Sprinkler = {
 -- NEU: Sabotage-Detection
 Config.Sabotage = {
     -- Dauer der Sabotage-Aktion in Millisekunden (Progressbar)
-    ActionDuration  = 8000,
+    ActionDuration  = 10000,
     -- Health-Verlust durch eine Sabotage-Aktion
     HealthDamage    = 50,
     -- Maximale Distanz in Metern vom Gerät bei der Sabotage möglich ist
     MaxDistance     = 2.0,
     -- Cooldown in Sekunden zwischen Sabotage-Aktionen pro Spieler
     Cooldown        = 60,
+    -- Item das zum Sabotieren benötigt wird. "" = kein Item nötig.
+    SabotageItem        = "screwdriverset",
+    -- true = Item wird beim Sabotieren verbraucht, false = nur Besitz prüfen
+    SabotageConsumeItem = false,
 }
 
 Config.Devices = {

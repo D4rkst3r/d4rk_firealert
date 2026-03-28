@@ -260,8 +260,11 @@ RegisterNetEvent('d4rk_firealert:client:updateSystemStatus', function(systemId, 
         if sprinklerObjects[id] then
             for _, s in ipairs(sprinklerObjects[id]) do
                 if DoesEntityExist(s.obj) and not activeSprinklers[s.deviceId] then
-                    local c       = GetEntityCoords(s.obj)
-                    local handle  = StartParticleFxLoopedAtCoord(
+                    local c = GetEntityCoords(s.obj)
+                    -- UseParticleFxAsset muss direkt vor dem Start-Aufruf stehen,
+                    -- sonst ignoriert GTA die Bank und kein Effekt wird gerendert
+                    UseParticleFxAssetNextCall(Config.Sprinkler.ParticleDict)
+                    local handle = StartParticleFxLoopedAtCoord(
                         Config.Sprinkler.ParticleEffect,
                         c.x, c.y, c.z,
                         0.0, 0.0, 0.0,
@@ -340,6 +343,8 @@ RegisterNetEvent('d4rk_firealert:client:toggleSprinkler', function(deviceId, act
     if activate then
         if activeSprinklers[deviceId] then return end  -- bereits aktiv
         local c      = GetEntityCoords(obj)
+        -- UseParticleFxAsset muss direkt vor dem Start-Aufruf stehen
+        UseParticleFxAssetNextCall(Config.Sprinkler.ParticleDict)
         local handle = StartParticleFxLoopedAtCoord(
             Config.Sprinkler.ParticleEffect,
             c.x, c.y, c.z,
@@ -504,9 +509,13 @@ end)
 
 -- NEU: Sprinkler-Thread — Feuer im Radius aktiver Sprinkler löschen
 CreateThread(function()
-    -- Partikel-Dictionary vorab laden damit der Effekt sofort sichtbar ist
+    -- Partikel-Dictionary laden und auf Abschluss warten.
+    -- Ohne diesen Wait kann die Bank noch nicht bereit sein wenn der erste
+    -- Sprinkler aktiviert wird — UseParticleFxAssetNextCall würde dann ins Leere greifen.
     RequestNamedPtfxAsset(Config.Sprinkler.ParticleDict)
-    while not HasNamedPtfxAssetLoaded(Config.Sprinkler.ParticleDict) do Wait(100) end
+    while not HasNamedPtfxAssetLoaded(Config.Sprinkler.ParticleDict) do
+        Wait(100)
+    end
 
     while true do
         Wait(Config.Sprinkler.ExtinguishInterval)
@@ -514,9 +523,37 @@ CreateThread(function()
         for deviceId, handle in pairs(activeSprinklers) do
             local obj = deviceEntityMap[deviceId]
             if obj and DoesEntityExist(obj) then
-                local c = GetEntityCoords(obj)
-                -- Feuer im Löschradius des Sprinklers entfernen
-                RemoveAllFiresInRange(c.x, c.y, c.z, Config.Sprinkler.ExtinguishRadius)
+                local c      = GetEntityCoords(obj)
+                local radius = Config.Sprinkler.ExtinguishRadius
+
+                -- RemoveAllFiresInRange existiert nicht als FiveM-Native.
+                -- Workaround: alle Peds, Fahrzeuge und Objekte im Radius finden
+                -- und deren Feuer per StopEntityFire löschen.
+                -- World-Feuer (z.B. Molotov-Bodenflammen) können client-seitig
+                -- leider nicht direkt entfernt werden.
+                for _, ped in ipairs(GetGamePool('CPed')) do
+                    if DoesEntityExist(ped) and IsEntityOnFire(ped) then
+                        if #(GetEntityCoords(ped) - c) <= radius then
+                            StopEntityFire(ped)
+                        end
+                    end
+                end
+
+                for _, veh in ipairs(GetGamePool('CVehicle')) do
+                    if DoesEntityExist(veh) and IsEntityOnFire(veh) then
+                        if #(GetEntityCoords(veh) - c) <= radius then
+                            StopEntityFire(veh)
+                        end
+                    end
+                end
+
+                for _, o in ipairs(GetGamePool('CObject')) do
+                    if DoesEntityExist(o) and IsEntityOnFire(o) then
+                        if #(GetEntityCoords(o) - c) <= radius then
+                            StopEntityFire(o)
+                        end
+                    end
+                end
             else
                 -- Objekt existiert nicht mehr — Partikel aufräumen
                 if handle then StopParticleFxLooped(handle, false) end

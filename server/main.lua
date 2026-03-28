@@ -431,6 +431,39 @@ RegisterNetEvent('d4rk_firealert:server:sabotageDevice', function(deviceId, devi
         return
     end
 
+    -- NEU: Item-Check — Spieler braucht das konfigurierte Werkzeug
+    local sabotageItem = Config.Sabotage.SabotageItem
+    if sabotageItem and sabotageItem ~= "" then
+        local hasItem = false
+
+        if GetResourceState('ox_inventory') == 'started' then
+            hasItem = exports.ox_inventory:GetItem(src, sabotageItem, nil, true) ~= nil
+            if hasItem and Config.Sabotage.SabotageConsumeItem then
+                exports.ox_inventory:RemoveItem(src, sabotageItem, 1)
+            end
+
+        elseif GetResourceState('qb-inventory') == 'started' then
+            local Player = exports['qb-core']:GetCoreObject().Functions.GetPlayer(src)
+            if Player then
+                hasItem = Player.Functions.GetItemByName(sabotageItem) ~= nil
+                if hasItem and Config.Sabotage.SabotageConsumeItem then
+                    Player.Functions.RemoveItem(sabotageItem, 1)
+                end
+            end
+        else
+            hasItem = true
+        end
+
+        if not hasItem then
+            TriggerClientEvent('ox_lib:notify', src, {
+                title    = 'BMA',
+                description = 'Du benötigst: ' .. sabotageItem,
+                type     = 'error'
+            })
+            return
+        end
+    end
+
     -- Proximity-Check: Client-Koordinaten gegen Server-Koordinaten validieren
     if deviceCoords then
         local playerCoords = GetEntityCoords(GetPlayerPed(src))
