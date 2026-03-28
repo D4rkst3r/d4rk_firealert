@@ -12,7 +12,9 @@ CREATE TABLE IF NOT EXISTS `fire_devices` (
     `type`         VARCHAR(50) NOT NULL,
     `coords`       LONGTEXT    NOT NULL,
     `rotation`     LONGTEXT    NOT NULL,
-    `zone`         VARCHAR(50) DEFAULT 'Standard',
+    -- FIX #7: VARCHAR(150) statt VARCHAR(50) — verhindert stilles Abschneiden
+    -- bei langen Zonennamen aus lib.inputDialog
+    `zone`         VARCHAR(150) DEFAULT 'Standard',
     `health`       INT         DEFAULT 100,
     `last_service` TIMESTAMP   DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT `fk_system` FOREIGN KEY (`system_id`) REFERENCES `fire_systems`(`id`) ON DELETE CASCADE
@@ -21,12 +23,12 @@ CREATE TABLE IF NOT EXISTS `fire_devices` (
 CREATE INDEX IF NOT EXISTS `idx_system_id` ON `fire_devices` (`system_id`);
 CREATE INDEX IF NOT EXISTS `idx_health`    ON `fire_devices` (`health`);
 
--- FIX #2: Alarm-Log Tabelle für Einsatz-Protokolle
 CREATE TABLE IF NOT EXISTS `fire_alarm_log` (
     `id`          INT AUTO_INCREMENT PRIMARY KEY,
     `system_id`   INT          NOT NULL,
     `system_name` VARCHAR(100) NOT NULL,
-    `zone`        VARCHAR(50)  NOT NULL,
+    -- FIX #7: VARCHAR(150) statt VARCHAR(50)
+    `zone`        VARCHAR(150) NOT NULL,
     `trigger_type` ENUM('manual', 'automatic', 'test') DEFAULT 'manual',
     `triggered_at` TIMESTAMP   DEFAULT CURRENT_TIMESTAMP,
     `acknowledged_at` TIMESTAMP NULL DEFAULT NULL,
@@ -35,3 +37,7 @@ CREATE TABLE IF NOT EXISTS `fire_alarm_log` (
 
 CREATE INDEX IF NOT EXISTS `idx_log_system`  ON `fire_alarm_log` (`system_id`);
 CREATE INDEX IF NOT EXISTS `idx_log_time`    ON `fire_alarm_log` (`triggered_at`);
+
+-- Migration für bestehende Installationen (nur ausführen wenn Tabellen bereits existieren)
+-- ALTER TABLE `fire_devices`   MODIFY COLUMN `zone` VARCHAR(150) DEFAULT 'Standard';
+-- ALTER TABLE `fire_alarm_log` MODIFY COLUMN `zone` VARCHAR(150) NOT NULL;

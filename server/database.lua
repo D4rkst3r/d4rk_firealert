@@ -42,7 +42,6 @@ function db.getDeviceWithSystemName(deviceId)
 end
 
 -- Join mit fire_systems damit Panels ihren Systemnamen im State Bag speichern können
--- (wird für Option C Hybrid-Systemauswahl beim Platzieren benötigt)
 function db.getAllDevices()
     return MySQL.query.await([[
         SELECT fd.*, fs.name AS system_name
@@ -51,13 +50,18 @@ function db.getAllDevices()
     ]])
 end
 
-function db.getDevicesBySystem(systemId)
-    return MySQL.query.await('SELECT * FROM fire_devices WHERE system_id = ?', { systemId })
-end
-
 function db.getDeviceById(deviceId)
     local result = MySQL.query.await('SELECT * FROM fire_devices WHERE id = ?', { deviceId })
     return result and result[1] or nil
+end
+
+-- FIX #3: Serverseitige Validierung für triggerAutoAlarm — gibt alle Rauchmelder
+-- eines Systems zurück damit der Server gemeldete Koordinaten verifizieren kann
+function db.getSmokeDevicesBySystem(systemId)
+    return MySQL.query.await(
+        "SELECT id, coords FROM fire_devices WHERE system_id = ? AND type = 'smoke'",
+        { systemId }
+    )
 end
 
 function db.updateDeviceHealth(deviceId, newHealth)
@@ -70,7 +74,6 @@ function db.getTroubledDevices()
     return MySQL.query.await('SELECT DISTINCT system_id FROM fire_devices WHERE health < 20')
 end
 
--- FIX #9: getAllDevicesWithCoords entfernt — war Dead Code seit removeDevice per ID läuft
 function db.removeDevice(deviceId)
     return MySQL.update.await('DELETE FROM fire_devices WHERE id = ?', { deviceId })
 end

@@ -3,7 +3,7 @@ Config.Framework = "qbx"
 Config.Job       = "firefighter"
 
 Config.Debug   = true
-Config.Version = "2.2.0"
+Config.Version = "2.3.0"
 
 Config.Maintenance = {
     DegradeChance = 5,
@@ -36,6 +36,8 @@ Config.Interaction = {
     DistanceDevice = 1.5,  -- Interaktionsreichweite für Melder/Sirenen
 }
 
+-- Config.MDT entfernt — das Tablet läuft jetzt als eigenständige Resource d4rk_firemdt.
+-- Den Computer-Prop für ox_target dort in d4rk_firemdt/config.lua konfigurieren.
 
 Config.Devices = {
     ["panel"] = {

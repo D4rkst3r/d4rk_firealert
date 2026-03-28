@@ -3,7 +3,7 @@ game 'gta5'
 lua54 'yes'
 
 author  'D4rkst3r'
-version '2.2.0'
+version '2.3.0'
 
 shared_scripts {
     '@ox_lib/init.lua',
@@ -20,6 +20,7 @@ server_scripts {
 client_scripts {
     'client/placement.lua',
     'client/main.lua'
+    -- Kein mdt.lua mehr — das MDT läuft jetzt als eigene Resource: d4rk_firemdt
 }
 
 files {
@@ -33,10 +34,9 @@ dependencies {
     'oxmysql'
 }
 
--- FIX #10: ACE-Permissions für Commands registrieren
--- In server.cfg: add_ace group.firefighter command.install_bma allow
---                add_ace group.admin command.test_bma allow
-ace_permissions {
-    'command.install_bma',
-    'command.test_bma',
-}
+-- ACE-Permissions muessen manuell in server.cfg eingetragen werden:
+--
+--   add_ace group.firefighter command.install_bma allow
+--   add_ace group.admin       command.test_bma    allow
+--
+-- Das MDT-Command /firemdt wird von d4rk_firemdt selbst verwaltet.
