@@ -25,8 +25,8 @@ local function SelectSystemForDevice(deviceType, finalCoords, finalRot, zone)
 
     if #nearby == 0 then
         lib.notify({
-            title       = 'BMA Fehler',
-            description = 'Kein BMA-Panel in ' .. radius .. 'm Reichweite.\nInstalliere zuerst eine Zentrale.',
+            title       = 'FACP Fehler',
+            description = 'Kein FACP-Panel in ' .. radius .. 'm Reichweite.\nInstalliere zuerst eine Zentrale.',
             type        = 'error',
             duration    = 6000
         })
@@ -36,7 +36,7 @@ local function SelectSystemForDevice(deviceType, finalCoords, finalRot, zone)
     if #nearby == 1 then
         local system = nearby[1]
         lib.notify({
-            title       = 'BMA',
+            title       = 'FACP',
             description = '✅ Verknüpft mit: ' .. system.systemName .. ' (' .. string.format('%.1fm', system.dist) .. ')',
             type        = 'success',
             duration    = 4000
@@ -54,7 +54,7 @@ local function SelectSystemForDevice(deviceType, finalCoords, finalRot, zone)
             icon        = 'terminal',
             onSelect    = function()
                 lib.notify({
-                    title       = 'BMA',
+                    title       = 'FACP',
                     description = 'Verknüpft mit: ' .. system.systemName,
                     type        = 'success'
                 })
@@ -95,7 +95,7 @@ RegisterCommand('install_bma', function(source, args)
 
     if not isPanel and not next(panelObjects) then
         lib.notify({
-            title       = 'BMA Hinweis',
+            title       = 'FACP Hinweis',
             description = 'Noch keine Zentrale installiert. Starte mit /install_bma panel.',
             type        = 'warning',
             duration    = 5000
@@ -120,8 +120,8 @@ RegisterCommand('install_bma', function(source, args)
     local d     = math.min(1.5, maxD)
 
     local hint = isPanel
-        and '**BMA PLATZIERUNG** (Zentrale)\n[E] Bestätigen | [G] Abbrechen\n[↑/↓] Höhe | [←/→] Rotation | [Mausrad] Distanz | [ALT] Pitch'
-        or  ('**BMA PLATZIERUNG** (' .. Config.Devices[deviceType].label .. ')\n[E] Bestätigen | [G] Abbrechen\n[↑/↓] Höhe | [←/→] Rotation | [Mausrad] Distanz | [ALT] Pitch\n🔗 System wird automatisch per Nähe erkannt')
+        and '**FACP PLATZIERUNG** (Zentrale)\n[E] Bestätigen | [G] Abbrechen\n[↑/↓] Höhe | [←/→] Rotation | [Mausrad] Distanz | [ALT] Pitch'
+        or  ('**FACP PLATZIERUNG** (' .. Config.Devices[deviceType].label .. ')\n[E] Bestätigen | [G] Abbrechen\n[↑/↓] Höhe | [←/→] Rotation | [Mausrad] Distanz | [ALT] Pitch\n🔗 System wird automatisch per Nähe erkannt')
 
     lib.showTextUI(hint, { position = "left-center" })
 
@@ -183,7 +183,7 @@ RegisterCommand('install_bma', function(source, args)
                     { type = 'input', label = 'Zone / Raumname', placeholder = 'z.B. Küche EG', required = true },
                 }
 
-                local input = lib.inputDialog('BMA Konfiguration', inputFields)
+                local input = lib.inputDialog('FACP Konfiguration', inputFields)
 
                 if input then
                     DeleteEntity(ghost)
