@@ -9,7 +9,7 @@ Config.Version = "2.4.0"
 Config.Maintenance = {
     DegradeChance = 5,   -- % Chance pro Check dass ein Gerät Health verliert
     CheckInterval = 30,  -- Minuten zwischen automatischen Health-Checks
-    RepairItem    = "electronics_kit"  -- "" = kein Item nötig
+    RepairItem    = "repairkit"  -- "" = kein Item nötig
 }
 
 -- NEU: Wie viele Tage zwischen Pflichtinspektionen liegen.
