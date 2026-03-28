@@ -16,7 +16,6 @@ ghost = nil  -- Global damit main.lua beim onResourceStop darauf zugreifen kann
 
 local function SelectSystemForDevice(deviceType, finalCoords, finalRot, zone)
     if deviceType == "panel" then
-        -- Panel erstellt immer ein neues System — wird separat behandelt
         TriggerServerEvent('d4rk_firealert:server:registerDevice', deviceType, finalCoords, finalRot, zone, nil, nil)
         return
     end
@@ -35,7 +34,6 @@ local function SelectSystemForDevice(deviceType, finalCoords, finalRot, zone)
     end
 
     if #nearby == 1 then
-        -- Automatisch verknüpfen
         local system = nearby[1]
         lib.notify({
             title       = 'BMA',
@@ -48,7 +46,6 @@ local function SelectSystemForDevice(deviceType, finalCoords, finalRot, zone)
         return
     end
 
-    -- Mehrere Systeme → Auswahlmenü
     local options = {}
     for _, system in ipairs(nearby) do
         table.insert(options, {
@@ -84,7 +81,8 @@ RegisterCommand('install_bma', function(source, args)
 
     local deviceType = args[1]
     if not Config.Devices[deviceType] then
-        lib.notify({ title = 'Fehler', description = 'Ungültiger Typ! (panel/smoke/pull/siren)', type = 'error' })
+        -- FIX: Sprinkler als gültigen Typ ergänzt
+        lib.notify({ title = 'Fehler', description = 'Ungültiger Typ! (panel/smoke/pull/siren/sprinkler)', type = 'error' })
         return
     end
 
@@ -95,7 +93,6 @@ RegisterCommand('install_bma', function(source, args)
 
     local isPanel = (deviceType == "panel")
 
-    -- Frühzeitig warnen wenn kein Panel existiert und kein Panel gebaut wird
     if not isPanel and not next(panelObjects) then
         lib.notify({
             title       = 'BMA Hinweis',
@@ -160,7 +157,6 @@ RegisterCommand('install_bma', function(source, args)
             SetEntityCoords(ghost, offset.x, offset.y, offset.z)
             SetEntityRotation(ghost, playerRot.x + pitch, playerRot.y, playerRot.z + r, 2, true)
 
-            -- Blaue Linie zum nächsten Panel zeichnen (nur bei Nicht-Panel Geräten)
             if not isPanel then
                 local radius = Config.Placement and Config.Placement.SystemSearchRadius or 50.0
                 local nearby = GetNearbyPanels(offset, radius)
@@ -176,13 +172,10 @@ RegisterCommand('install_bma', function(source, args)
                 end
             end
 
-            -- BESTÄTIGEN (E)
             if IsControlJustPressed(0, 38) then
                 local finalCoords = GetEntityCoords(ghost)
                 local finalRot    = GetEntityRotation(ghost)
 
-                -- Panel: Systemname + optionaler Zonenname (z.B. "Panel EG")
-                -- Gerät: nur Zonenname (System wird via Nähe bestimmt)
                 local inputFields = isPanel and {
                     { type = 'input', label = 'Gebäude / Systemname', placeholder = 'z.B. Krankenhaus',   required = true },
                     { type = 'input', label = 'Zone / Raumname',      placeholder = 'z.B. Leitstelle EG'                 },
@@ -199,7 +192,6 @@ RegisterCommand('install_bma', function(source, args)
                     lib.hideTextUI()
 
                     if isPanel then
-                        -- Systemname = input[1], Zone = input[2] (optional, z.B. "Panel EG")
                         TriggerServerEvent('d4rk_firealert:server:registerDevice',
                             deviceType,
                             finalCoords,
@@ -209,7 +201,6 @@ RegisterCommand('install_bma', function(source, args)
                             nil
                         )
                     else
-                        -- Option C: System per Nähe bestimmen
                         SelectSystemForDevice(deviceType, finalCoords, finalRot, input[1])
                     end
                     break
@@ -218,7 +209,6 @@ RegisterCommand('install_bma', function(source, args)
                 end
             end
 
-            -- ABBRECHEN (G)
             if IsControlJustPressed(0, 47) then
                 DeleteEntity(ghost)
                 ghost     = nil

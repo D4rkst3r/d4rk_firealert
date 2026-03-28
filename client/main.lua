@@ -41,7 +41,7 @@ local DeviceLabels = {
     [GetHashKey('prop_fire_alarm_01')]              = { label = 'Handfeuermelder', icon = 'hand-point-up' },
     [GetHashKey('m23_1_prop_m31_controlpanel_02a')] = { label = 'Zentrale',        icon = 'terminal'      },
     [GetHashKey('prop_fire_alarm_02')]              = { label = 'Sirene',          icon = 'bell'          },
-    [GetHashKey('prop_water_pipe_dist')]            = { label = 'Sprinkler',       icon = 'droplet'       },
+    [GetHashKey('v_ret_gc_sprinkler')]              = { label = 'Sprinkler',       icon = 'droplet'       },
 }
 
 ---------------------------------------------------------
